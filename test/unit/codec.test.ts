@@ -55,6 +55,12 @@ const samples: Msg[] = [
   { type: MsgType.Sign, reqId: 12, objectId: 'o1', ttlSeconds: 60 },
   { type: MsgType.Signed, reqId: 12, url: 'https://x/o/db/o1?sig=1', expiresAtMs: 1 },
   { type: MsgType.GoAway, reason: 'shutdown', retryAfterMs: 1000 },
+  { type: MsgType.Call, reqId: 13, unit: 'checkout', args: '{"cartId":"c1"}', mutationId: 'm-3' },
+  { type: MsgType.Call, reqId: 14, unit: 'ping', args: '', mutationId: '' },
+  { type: MsgType.Returned, reqId: 13, ok: true, value: '{"orderId":7}', replayed: true, errCode: '', errMessage: '', errData: '' },
+  { type: MsgType.Returned, reqId: 14, ok: false, value: '', replayed: false, errCode: 'not_found', errMessage: 'no such cart', errData: '{"cart":"c1"}' },
+  { type: MsgType.UnitAdmin, reqId: 15, op: 'deploy', body: '{"bundle":"x"}' },
+  { type: MsgType.UnitAdminResult, reqId: 15, body: '{"version":1}' },
 ]
 
 describe('messages', () => {
@@ -65,7 +71,7 @@ describe('messages', () => {
       expect(m.type, `sample ${i}`).toBe(Number(type))
       expect(hex(encode(m)), `sample ${i} (type ${type})`).toBe(want)
     })
-    expect(new Set(samples.map((m) => m.type)).size).toBe(23) // every message type
+    expect(new Set(samples.map((m) => m.type)).size).toBe(27) // every message type
   })
 
   test('decode what Go encoded, and round-trip', () => {
