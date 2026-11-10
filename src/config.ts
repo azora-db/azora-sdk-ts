@@ -16,8 +16,11 @@ export type CredentialProvider = () => string | Promise<string>
 /** Options of {@link connect}. */
 export interface ConnectOptions {
   /**
-   * A connection string (see {@link parseUrl}). Its parts can also be given
-   * one by one with the fields below, which win over the URL.
+   * Where the database is (see {@link parseUrl}), usually
+   * `https://db.example.com/shop?key=<server key>`: the engine's HTTP
+   * address, the database as the last path segment and the server's public
+   * key. Nothing in it is secret. Its parts can also be given one by one
+   * with the fields below, which win over the URL.
    */
   url?: string
   /** The server's raw TCP realtime address (Node, Bun, Deno). */
@@ -46,15 +49,16 @@ export interface ConnectOptions {
    */
   allowPlaintext?: boolean
 
-  /** An API key (`azk_…`). */
-  apiKey?: string
   /**
-   * A client token (`azt1.…`), or a function returning a fresh one. The
-   * function runs on every (re)connect and whenever the server reports
-   * that the credential expired.
+   * Who the client is: an API key (`azk_…`) or a client token (`azt1.…`),
+   * or a function returning one. Keep it private. The function runs on
+   * every (re)connect and whenever the server reports that the credential
+   * expired.
    */
   token?: string | CredentialProvider
-  /** Same as `apiKey`/`token`, for code that does not care which it is. */
+  /** Another name for `token`. Give one of them. */
+  apiKey?: string | CredentialProvider
+  /** Another name for `token`. */
   credential?: string | CredentialProvider
 
   /** Identifies the application in the server's logs (default `azora-js/<version>`). */
@@ -76,11 +80,12 @@ export interface ConnectOptions {
   pool?: number
 
   /**
-   * Base URL of the engine's HTTP server, for file storage
-   * (`https://files.example.com`). Derived from `webSocketUrl` when unset.
+   * Base URL of the engine's HTTP server, for file storage. An `http(s)`
+   * or WebSocket URL already tells it; set it for `azora://` connections
+   * (`https://db.example.com`).
    */
   storageUrl?: string
-  /** The `fetch` used for file storage (default: the global one). */
+  /** The `fetch` used for file storage and discovery (default: the global one). */
   fetch?: typeof fetch
   /** A WebSocket constructor, for runtimes without a global one. */
   webSocket?: WebSocketCtor
@@ -108,7 +113,13 @@ export interface ResolvedOptions {
   port: number
   webSocketUrl: string
   database: string
+  /** How the server is authenticated. With `discovery` set it has no key yet: discovery supplies it. */
   security: ChannelSecurity
+  /**
+   * Set when the URL names no server key: the key (and the WebSocket path,
+   * unless `fixedEndpoint`) come from `<base>/.well-known/azora.json`.
+   */
+  discovery: { base: string; fixedEndpoint: boolean } | null
   credential: string
   credentialProvider: CredentialProvider | null
   clientName: string
@@ -162,39 +173,42 @@ function normalizeFingerprint(fp: string): string {
 }
 
 /**
- * Parses a connection string:
- *
- * ```
- * azora://host[:port]/<database>?key=<server public key>     TCP (port 7480)
- * azora://host/<database>?fp=azp1-xxxx-…                     first contact
- * azoras+ws://host[:port][/path]?db=<database>&key=…         WebSocket over TLS
- * azora+ws://host[:port][/path]?db=<database>&key=…          plain WebSocket
- * wss://host[/path]?db=<database>&key=…                      same as azoras+ws
- * ws://host[/path]?db=<database>&key=…                       same as azora+ws
- * ```
- *
- * The WebSocket path defaults to `/rt/v1`. Query parameters: `key`, `fp`,
- * `db` (for `azora://` the path may name the database instead) and
- * `plaintext=1` (tests only). Credentials are never read from a URL.
+ * Reports whether host (a URL's hostname) is this machine: `localhost`,
+ * 127.0.0.0/8 or `::1`.
  */
-export function parseUrl(input: string): ConnectOptions {
+export function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h === '::1') return true
+  const m = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h)
+  return m !== null && m.slice(1).every((n) => Number(n) <= 255)
+}
+
+/** A parsed connection string; `base` is set for the `http(s)://` form. */
+interface Parsed {
+  options: ConnectOptions
+  /** `scheme://host[:port][/prefix]`: the engine's HTTP address, without the database. */
+  base?: string
+}
+
+function parse(input: string): Parsed {
   const text = input.trim()
   const m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(text)
-  if (!m) bad('connection string: missing scheme (azora://, azora+ws://, azoras+ws://, ws:// or wss://)')
+  if (!m) bad('connection string: missing scheme (https://, http://, azora://, wss:// or ws://)')
   const scheme = (m[1] as string).toLowerCase()
-  if (!['azora', 'azora+ws', 'azoras+ws', 'ws', 'wss'].includes(scheme)) {
-    bad(`connection string: unsupported scheme "${scheme}" (azora, azora+ws, azoras+ws, ws, wss)`)
+  if (!['http', 'https', 'azora', 'azora+ws', 'azoras+ws', 'ws', 'wss'].includes(scheme)) {
+    bad(`connection string: unsupported scheme "${scheme}" (https, http, azora, azora+ws, azoras+ws, ws, wss)`)
   }
+  const web = scheme === 'http' || scheme === 'https'
   const rest = text.slice(m[0].length)
   if (rest === '' || /^[/?#]/.test(rest)) bad('connection string: missing host')
   // The URL class only gives hosts and ports to schemes it knows.
   let u: URL
   try {
-    u = new URL('http://' + rest)
+    u = new URL((web ? scheme : 'http') + '://' + rest)
   } catch {
     bad('connection string: malformed URL')
   }
-  if (u.username || u.password) bad('connection string: user info is not supported (pass apiKey or token)')
+  if (u.username || u.password) bad('connection string: user info is not supported (pass the token option)')
   if (!u.hostname) bad('connection string: missing host')
   if (u.hash) bad('connection string: unexpected fragment')
   const out: ConnectOptions = {}
@@ -210,6 +224,7 @@ export function parseUrl(input: string): ConnectOptions {
         out.fingerprint = v
         break
       case 'db':
+        if (web) bad(`connection string: unknown parameter "db" (in an ${scheme}:// URL the database is the last path segment)`)
         out.database = v
         break
       case 'plaintext':
@@ -219,6 +234,21 @@ export function parseUrl(input: string): ConnectOptions {
       default:
         bad(`connection string: unknown parameter "${k}"`)
     }
+  }
+  if (web) {
+    const path = u.pathname.replace(/\/+$/, '')
+    const cut = path.lastIndexOf('/')
+    const last = path.slice(cut + 1)
+    if (!last) bad(`connection string: the URL must end with the database name (${scheme}://${u.host}/<database>)`)
+    try {
+      out.database = decodeURIComponent(last)
+    } catch {
+      bad(`connection string: malformed database name "${last}"`)
+    }
+    const base = `${scheme}://${u.host}${path.slice(0, cut)}`
+    out.webSocketUrl = `${scheme === 'https' ? 'wss' : 'ws'}${base.slice(scheme.length)}${DEFAULT_WEBSOCKET_PATH}`
+    out.storageUrl = base
+    return { options: out, base }
   }
   if (scheme === 'azora') {
     const path = u.pathname.replace(/^\/+|\/+$/g, '')
@@ -236,7 +266,39 @@ export function parseUrl(input: string): ConnectOptions {
     out.webSocketUrl = `${secure ? 'wss' : 'ws'}://${u.host}${path}`
   }
   if (!out.database) bad('connection string: missing database')
-  return out
+  return { options: out }
+}
+
+/**
+ * Parses a connection string. The usual form is the engine's HTTP address
+ * with the database as the last path segment:
+ *
+ * ```
+ * https://host[:port][/prefix]/<database>?key=<server public key>
+ * https://host/<database>                 the key is read from the server (https or loopback only)
+ * http://127.0.0.1:8090/<database>        a local engine
+ * ```
+ *
+ * The connection is a WebSocket to `/rt/v1` under that address, and file
+ * storage uses the same address. The other forms name the realtime
+ * endpoint itself:
+ *
+ * ```
+ * azora://host[:port]/<database>?key=<server public key>     TCP (port 7480)
+ * azora://host/<database>?fp=azp1-xxxx-…                     first contact
+ * azoras+ws://host[:port][/path]?db=<database>&key=…         WebSocket over TLS
+ * azora+ws://host[:port][/path]?db=<database>&key=…          plain WebSocket
+ * wss://host[/path]?db=<database>&key=…                      same as azoras+ws
+ * ws://host[/path]?db=<database>&key=…                       same as azora+ws
+ * ```
+ *
+ * Their WebSocket path defaults to `/rt/v1`. Query parameters: `key`, `fp`,
+ * `db` (not with `http(s)://`; for `azora://` the path may name the
+ * database instead) and `plaintext=1` (tests only). Credentials are never
+ * read from a URL.
+ */
+export function parseUrl(input: string): ConnectOptions {
+  return parse(input).options
 }
 
 /** Builds the handshake configuration from the key options. */
@@ -259,9 +321,25 @@ export function security(o: Pick<ConnectOptions, 'serverKey' | 'fingerprint' | '
   return sec
 }
 
+/**
+ * Refuses to read the server key of an `http(s)://` URL without one from
+ * the server unless a certificate (https) or the loopback interface
+ * proves that the answer comes from the right server.
+ */
+function checkDiscovery(base: string, database: string): void {
+  const u = new URL(base)
+  if (u.protocol === 'https:' || isLoopbackHost(u.hostname)) return
+  bad(
+    `${base}/${encodeURIComponent(database)} has no server key: add ?key=<server key> to the URL ` +
+      `("azora connect ${database}" on the server prints it). A URL without a key is accepted only over https or for a loopback address: ` +
+      'the client then asks the server for its key, and over plain http nothing proves that the answer comes from the right server',
+  )
+}
+
 /** Validates options and fills defaults; `url` is merged under the explicit fields. */
 export function resolveOptions(input: ConnectOptions): ResolvedOptions {
-  const o: ConnectOptions = { ...(input.url ? parseUrl(input.url) : {}) }
+  const parsed: Parsed = input.url ? parse(input.url) : { options: {} }
+  const o: ConnectOptions = { ...parsed.options }
   for (const [k, v] of Object.entries(input)) {
     if (v !== undefined && k !== 'url') (o as Record<string, unknown>)[k] = v
   }
@@ -282,9 +360,22 @@ export function resolveOptions(input: ConnectOptions): ResolvedOptions {
   if (!Number.isInteger(port) || port < 1 || port > 65535) bad(`bad port ${port}`)
 
   const given = [o.apiKey, o.token, o.credential].filter((c) => c !== undefined && c !== '')
-  if (given.length === 0) bad('a credential is required: apiKey, token or credential')
-  if (given.length > 1) bad('give one of apiKey, token and credential')
+  if (given.length === 0) bad('a credential is required: the token option (an API key or a client token)')
+  if (given.length > 1) bad('give one of token, apiKey and credential')
   const cred = given[0] as string | CredentialProvider
+
+  // An http(s) URL without a key: the server is asked for it at connect time.
+  let discovery: ResolvedOptions['discovery'] = null
+  let sec: ChannelSecurity
+  if (parsed.base !== undefined && !o.serverKey && !o.fingerprint && !o.allowPlaintext) {
+    checkDiscovery(parsed.base, o.database)
+    discovery = { base: parsed.base, fixedEndpoint: !!input.webSocketUrl }
+    sec = {}
+    if (o.rekeyFrames !== undefined) sec.rekeyFrames = o.rekeyFrames
+    if (o.rekeyBytes !== undefined) sec.rekeyBytes = o.rekeyBytes
+  } else {
+    sec = security(o)
+  }
 
   let storageUrl = (o.storageUrl ?? '').replace(/\/+$/, '')
   if (!storageUrl && webSocketUrl) {
@@ -300,7 +391,8 @@ export function resolveOptions(input: ConnectOptions): ResolvedOptions {
     port,
     webSocketUrl,
     database: o.database,
-    security: security(o),
+    security: sec,
+    discovery,
     credential: typeof cred === 'string' ? cred : '',
     credentialProvider: typeof cred === 'function' ? cred : null,
     clientName: o.clientName || DEFAULT_CLIENT_NAME,
