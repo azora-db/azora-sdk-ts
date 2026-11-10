@@ -4,7 +4,7 @@
  *   pnpm dev:engine                                          # terminal 1
  *   node --env-file=examples/.env examples/quickstart.ts     # terminal 2
  */
-import { connect, sql } from '@azora-db/client'
+import { connectEnv, sql } from '@azora-db/client'
 
 interface Order {
   id: number
@@ -14,7 +14,8 @@ interface Order {
   note: string | null
 }
 
-const db = await connect(process.env['AZORA_URL']!, { apiKey: process.env['AZORA_API_KEY']! })
+// Two values: AZORA_URL says where the database is (public), AZORA_TOKEN who you are (private).
+const db = await connectEnv()
 console.log(`connected as ${db.session?.principal} (${db.session?.mode}, scopes: ${db.session?.scopes.join(', ')})`)
 
 // Reads return objects keyed by column name.
