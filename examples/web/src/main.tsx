@@ -8,7 +8,9 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.tsx'
 
-const url = import.meta.env.VITE_AZORA_WS_URL as string | undefined
+// Where the database is: public, it can ship in the bundle.
+const url = import.meta.env.VITE_AZORA_URL as string | undefined
+// Who the user is: a short-lived token, here minted by the dev engine.
 const token = import.meta.env.VITE_AZORA_TOKEN as string | undefined
 
 /** Connects once, then hands the database to the app. */
