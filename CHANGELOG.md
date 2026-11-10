@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Units
+
+- Units: TypeScript functions published into a database and called by
+  name. `db.call(name, args, { mutationId })` returns a unit's result;
+  `connect<typeof import('./units')>()` and `connectEnv<M>()` type
+  `db.units.<name>(args)` from the units' source (non-internal queries,
+  mutations and actions). `Database` without a type argument is
+  unchanged.
+- Every call carries a fresh mutation id, sent again unchanged after a
+  lost connection. Blobs travel as `{"$bytes": base64}` and come back as
+  `Uint8Array`.
+- `UnitError` (`code`, `message`, `data`, `unit`) when a unit throws;
+  failures around the unit stay `AzoraError`.
+- `db.unitsAdmin`: `deploy`, `list`, `deploys`, `activate`, `call`,
+  `runs`, `triggers`, `skipTrigger`, `secrets.list/set/unset`. Changes
+  are not resent after a lost connection; reads are.
+- A connection that read `/.well-known/azora.json` refuses unit calls
+  with `unavailable: this server does not support units` when the
+  document does not list `"units"` in `features`.
+- React: `useUnit(name)` and `useUnitQuery(name, args, deps, { watch })`;
+  `useAzora<M>()` returns a typed database.
+- Protocol: the Call (24), Returned (25), UnitAdmin (26) and
+  UnitAdminResult (27) messages.
+- New package `@azora-db/units` (`packages/units`; the repository is now
+  a pnpm workspace): `query`, `mutation`, `action`, `schedule`,
+  `onChange`, the `v` validators (JSON Schema for the engine, TypeScript
+  types for handlers and clients), `UnitError` and the `ctx` types; the
+  `azora-units` CLI (`publish`, `dev`, `list`, `history`, `rollback`,
+  `call`, `logs`, `secrets`, `types --go`), which bundles units with
+  esbuild; and `@azora-db/units/tools` for scripts.
+- `examples/units`: a shop whose customer token cannot run SQL but checks
+  out its own cart through a unit. `pnpm dev:engine` creates its tables
+  and publishes it when the engine supports units.
+- `pnpm build`, `pnpm typecheck` and `pnpm test` cover both packages;
+  `pnpm test:units` runs the units package's tests alone.
+
+### First version
+
 First version of the TypeScript SDK.
 
 - Connecting takes two values, a public URL and a private token:
