@@ -116,3 +116,36 @@ export function isPermanent(err: unknown): boolean {
     err.code === ErrorCode.NotFound
   )
 }
+
+/** The codes a unit throws (`UnitError.code`); anything else a unit throws arrives as `failed`. */
+export const UnitErrorCode = {
+  Invalid: 'invalid',
+  NotFound: 'not_found',
+  PermissionDenied: 'permission_denied',
+  Conflict: 'conflict',
+  Failed: 'failed',
+} as const
+export type UnitErrorCodeValue = (typeof UnitErrorCode)[keyof typeof UnitErrorCode] | (string & {})
+
+/**
+ * The error a unit threw (`throw new UnitError(code, message, data)` in the
+ * unit, or any other exception, as code `failed`). Failures around the
+ * unit (no such unit, arguments that do not match, a timeout) are an
+ * {@link AzoraError} instead.
+ */
+export class UnitError extends Error {
+  override name = 'UnitError'
+  /** The unit that was called. */
+  readonly unit: string
+  /** One of {@link UnitErrorCode}. */
+  readonly code: UnitErrorCodeValue
+  /** The JSON value the unit attached (blobs as Uint8Array), undefined for none. */
+  readonly data: unknown
+
+  constructor(unit: string, code: UnitErrorCodeValue, message: string, data?: unknown) {
+    super(message)
+    this.unit = unit
+    this.code = code
+    this.data = data
+  }
+}
