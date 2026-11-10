@@ -20,8 +20,11 @@
     "noEmit": true,
     "paths": {
       "#tcp": ["./src/platform/tcp.node.ts"],
-      "#aead": ["./src/platform/aead.node.ts"]
+      "#aead": ["./src/platform/aead.node.ts"],
+      "@azora-db/client": ["./src/index.ts"],
+      "@azora-db/units": ["./packages/units/src/index.ts"],
+      "@azora-db/units/tools": ["./packages/units/src/tools.ts"]
     }
   },
-  "include": ["src", "test", "bench", "scripts", "examples/*.ts", "vitest.config.ts"]
+  "include": ["src", "test", "bench", "scripts", "examples/*.ts", "examples/units/*.ts", "examples/units/units/**/*.ts", "vitest.config.ts"]
 }
