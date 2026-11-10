@@ -1,7 +1,7 @@
 {
   "name": "@azora-db/client",
   "version": "0.1.0",
-  "description": "TypeScript SDK for Azora DB: encrypted connections, SQL, exactly-once writes, live queries and file storage",
+  "description": "TypeScript SDK for Azora DB: encrypted connections, SQL, exactly-once writes, live queries, file storage and units",
   "type": "module",
   "license": "UNLICENSED",
   "private": true,
@@ -39,15 +39,16 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json && pnpm --filter @azora-db/units build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/units/tsconfig.json --noEmit",
+    "test": "vitest run && pnpm --filter @azora-db/units test",
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
     "bench": "tsc -p tsconfig.build.json && node bench/run.ts",
     "bench:aead": "node bench/aead.ts",
     "dev:engine": "node scripts/dev-engine.ts",
-    "test:fast": "vitest run --exclude test/integration/longrun.test.ts"
+    "test:fast": "vitest run --exclude test/integration/longrun.test.ts && pnpm --filter @azora-db/units test",
+    "test:units": "pnpm --filter @azora-db/units test"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
