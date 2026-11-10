@@ -4,9 +4,9 @@
  *
  *   node --env-file=examples/.env examples/watch.ts
  */
-import { connect } from '@azora-db/client'
+import { connectEnv } from '@azora-db/client'
 
-const db = await connect(process.env['AZORA_URL']!, { apiKey: process.env['AZORA_API_KEY']! })
+const db = await connectEnv() // AZORA_URL and AZORA_TOKEN
 
 const report = async (): Promise<void> => {
   const rows = await db.query<{ status: string; orders: number; revenue: number }>(
