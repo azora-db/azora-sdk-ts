@@ -1,0 +1,53 @@
+{
+  "name": "@azora-db/client",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Azora DB: encrypted connections, SQL, exactly-once writes, live queries and file storage",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "sideEffects": false,
+  "engines": { "node": ">=22" },
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./react": { "types": "./dist/react.d.ts", "default": "./dist/react.js" },
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#tcp": {
+      "node": "./dist/platform/tcp.node.js",
+      "bun": "./dist/platform/tcp.node.js",
+      "deno": "./dist/platform/tcp.node.js",
+      "default": "./dist/platform/tcp.web.js"
+    },
+    "#aead": {
+      "node": "./dist/platform/aead.node.js",
+      "bun": "./dist/platform/aead.node.js",
+      "default": "./dist/platform/aead.web.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "bench": "tsc -p tsconfig.build.json && node bench/run.ts",
+    "dev:engine": "node scripts/dev-engine.ts",
+    "test:fast": "vitest run --exclude test/integration/longrun.test.ts"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "peerDependencies": { "react": ">=18" },
+  "peerDependenciesMeta": { "react": { "optional": true } },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "typescript": "~7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
