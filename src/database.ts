@@ -2,6 +2,7 @@
 import { Client } from './client.ts'
 import { toValue, type InputValue, type Value } from './codec.ts'
 import { resolveOptions, type ConnectOptions, type ResolvedOptions } from './config.ts'
+import { Discovery } from './discovery.ts'
 import { LiveQuery, type LiveOptions } from './live.ts'
 import type { Session } from './session.ts'
 import { Storage } from './storage.ts'
@@ -87,7 +88,8 @@ export class Database {
   /** @internal Use {@link connect}. */
   static async open(options: ConnectOptions, call?: CallOptions): Promise<Database> {
     const o = resolveOptions(options)
-    const clients = Array.from({ length: o.pool }, () => new Client(o))
+    const discovery = o.discovery ? new Discovery(o) : null // one answer for the whole pool
+    const clients = Array.from({ length: o.pool }, () => new Client(o, discovery))
     try {
       // The first connection proves the configuration; the others follow at once.
       await (clients[0] as Client).connect(call)
@@ -337,10 +339,17 @@ export class Database {
  * (rejecting with its error otherwise: a wrong key, a refused credential,
  * an unreachable server).
  *
+ * A client needs two values. The URL says where the database is: the
+ * engine's HTTP address, the database as the last path segment, and the
+ * server's public key. Nothing in it is secret. The token says who the
+ * client is, an API key or a client token: keep it private.
+ *
  * ```ts
- * const db = await connect('azora://db.example.com/shop?key=<server key>', { apiKey: process.env.AZORA_API_KEY })
- * const db = await connect('wss://db.example.com/rt/v1?db=shop&key=<server key>', { token: () => fetchToken() })
+ * const db = await connect('https://db.example.com/shop?key=<server key>', { token: process.env.AZORA_TOKEN })
+ * const db = await connect('https://db.example.com/shop?key=<server key>', { token: () => fetchToken() })
  * ```
+ *
+ * See {@link parseUrl} for the other URL forms (raw TCP, WebSocket).
  */
 export function connect(url: string, options?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database>
 export function connect(options: ConnectOptions & CallOptions): Promise<Database>
@@ -353,3 +362,33 @@ export function connect(a: string | (ConnectOptions & CallOptions), b?: Omit<Con
   return Database.open(options, call)
 }
 
+/**
+ * Connects with the two values from the environment: `AZORA_URL` (where
+ * the database is; public) and `AZORA_TOKEN` (an API key or a client
+ * token; private). `AZORA_API_KEY` is read when `AZORA_TOKEN` is not set.
+ * `azora connect <database> --key <name>` on the server prints both
+ * lines.
+ *
+ * ```ts
+ * const db = await connectEnv()
+ * ```
+ *
+ * A credential given in options is used instead of the environment's.
+ * Where there is no `process.env` (browsers), pass the values to
+ * {@link connect}.
+ */
+export async function connectEnv(options: Omit<ConnectOptions, 'url'> & CallOptions = {}): Promise<Database> {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
+  const url = env['AZORA_URL']
+  if (!url) {
+    throw new TypeError('azora: connectEnv: AZORA_URL is not set (the database\'s address, for example https://db.example.com/shop?key=<server key>)')
+  }
+  const o: ConnectOptions & CallOptions = { ...options }
+  const given = [o.token, o.apiKey, o.credential].some((c) => c !== undefined && c !== '')
+  if (!given) {
+    const token = env['AZORA_TOKEN'] || env['AZORA_API_KEY']
+    if (!token) throw new TypeError('azora: connectEnv: AZORA_TOKEN is not set (an API key or a client token)')
+    o.token = token
+  }
+  return connect(url, o)
+}
