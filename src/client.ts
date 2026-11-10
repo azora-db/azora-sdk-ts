@@ -5,7 +5,10 @@
  * face; it owns one or several clients.
  */
 import type { ResolvedOptions } from './config.ts'
-import { AzoraError, ClosedError, ConnectionError, ErrorCode, isPermanent, LostError, TimeoutError, UnknownOutcomeError } from './errors.ts'
+import type { Discovery } from './discovery.ts'
+import {
+  AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, isPermanent, LostError, TimeoutError, UnknownOutcomeError,
+} from './errors.ts'
 import { MsgType, type ErrorMsg, type Msg, type Result, type Shape, type Signed } from './messages.ts'
 import { dial, type Link, type Session } from './session.ts'
 import { Subscription } from './subscription.ts'
@@ -34,6 +37,7 @@ export class Client {
   readonly stats = { connects: 0, disconnects: 0, connectFailures: 0, retries: 0, rateLimited: 0, resyncs: 0, refreshes: 0 }
 
   private readonly o: ResolvedOptions
+  private readonly discovery: Discovery | null // supplies the server key when the URL has none
   private readonly life = new AbortController() // aborted by close()
   private readonly changed = new Notifier() // the current link or `closed` changed
   private cur: Link | null = null
@@ -51,8 +55,9 @@ export class Client {
   private following: Link | null = null // the link the supervisor waits on
   private supervisor: Promise<void> = Promise.resolve()
 
-  constructor(o: ResolvedOptions) {
+  constructor(o: ResolvedOptions, discovery: Discovery | null = null) {
     this.o = o
+    this.discovery = discovery
     this.cred = o.credential
   }
 
@@ -165,7 +170,15 @@ export class Client {
   }
 
   private async dialOnce(signal: AbortSignal): Promise<Link> {
-    const link = await dial(this.o, await this.credential(), signal)
+    const at = await this.discovery?.get(signal)
+    let link: Link
+    try {
+      link = await dial(this.o, await this.credential(), signal, at)
+    } catch (e) {
+      // A discovered key that fails the handshake may have been rotated: the next attempt asks the server again.
+      if (at && e instanceof HandshakeError) this.discovery?.invalidate(at)
+      throw e
+    }
     link.onMessage = (m, size) => this.handle(link, m, size)
     return link
   }
