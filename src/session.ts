@@ -99,6 +99,8 @@ export class Link {
       case MsgType.Subscribed:
       case MsgType.Verified:
       case MsgType.Signed:
+      case MsgType.Returned:
+      case MsgType.UnitAdminResult:
         this.deliver(m.reqId, m)
         return
       case MsgType.Error:
