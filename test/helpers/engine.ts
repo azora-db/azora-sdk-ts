@@ -137,6 +137,7 @@ export async function startEngine(o: EngineOptions = {}): Promise<Engine> {
       await new Promise<void>((ok, fail) => {
         const timer = setTimeout(() => fail(new Error(`azora serve did not start:\n${out}`)), 20_000)
         const onData = (b: Buffer): void => {
+          if (process.env['AZORA_ENGINE_LOG']) process.stderr.write(b) // the server's log, for debugging
           out += b.toString()
           const m = /server key (\S+) \(fingerprint (azp1-[a-z2-7-]+)\)/.exec(out)
           if (m && out.includes('Serving storage')) {
