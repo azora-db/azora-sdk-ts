@@ -2,6 +2,7 @@
 import { type Channel, fingerprint, openChannel } from './channel.ts'
 import { encodeServerKey, type ResolvedOptions } from './config.ts'
 import { AzoraError, ConnectionError, LostError } from './errors.ts'
+import type { Endpoint } from './discovery.ts'
 import { decode, encode, MsgType, PROTOCOL_VERSION, type Msg, type Welcome } from './messages.ts'
 import { connectWebSocket, type Transport } from './transport.ts'
 import { connectTCP } from '#tcp'
@@ -209,18 +210,22 @@ export class Link {
   }
 }
 
-/** @internal Opens a transport, runs the handshake and Hello, and returns the link. */
-export async function dial(o: ResolvedOptions, credential: string, signal: AbortSignal): Promise<Link> {
+/**
+ * @internal Opens a transport, runs the handshake and Hello, and returns
+ * the link. `at` is the endpoint when discovery supplied it (default: the
+ * options').
+ */
+export async function dial(o: ResolvedOptions, credential: string, signal: AbortSignal, at: Endpoint = o): Promise<Link> {
   const t: Transport = o.transport
     ? await o.transport(signal)
-    : o.webSocketUrl
-      ? await connectWebSocket(o.webSocketUrl, o.webSocket, signal)
+    : at.webSocketUrl
+      ? await connectWebSocket(at.webSocketUrl, o.webSocket, signal)
       : await connectTCP(o.host, o.port, signal)
   const onAbort = (): void => t.close()
   signal.addEventListener('abort', onAbort, { once: true })
   try {
     if (signal.aborted) throw signal.reason
-    const ch = await openChannel(t, o.security)
+    const ch = await openChannel(t, at.security)
     return await new Promise<Link>((resolve, reject) => {
       ch.onClose = (err) => reject(err ?? new ConnectionError('azora: connection closed before the session started'))
       ch.onMessage = (raw) => {
