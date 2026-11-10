@@ -24,6 +24,11 @@ export interface Endpoint {
 export class Discovery {
   /** How many times the server was asked. */
   fetches = 0
+  /**
+   * The optional features the server's last answer listed (`"units"`, ...);
+   * null until it answered.
+   */
+  features: readonly string[] | null = null
 
   private readonly url: string
   private readonly o: ResolvedOptions
@@ -98,7 +103,7 @@ export class Discovery {
       this.fail(`${(e as Error).message}${cause ? ` (${cause})` : ''}`)
     }
     if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) this.fail('the answer is not a discovery document')
-    const d = doc as { azora?: unknown; server_key?: unknown; websocket?: unknown }
+    const d = doc as { azora?: unknown; server_key?: unknown; websocket?: unknown; features?: unknown }
     if (d.azora !== 1) this.fail(`unsupported document version ${JSON.stringify(d.azora) ?? 'none'} (want "azora": 1)`)
     let key: Uint8Array
     try {
@@ -110,6 +115,8 @@ export class Discovery {
     const path = d.websocket
     if (typeof path !== 'string' || !/^\/(?!\/)/.test(path)) this.fail(`"websocket" is not a path: ${JSON.stringify(path) ?? 'missing'}`)
     const { base, fixedEndpoint } = this.o.discovery as { base: string; fixedEndpoint: boolean }
+    // Servers older than the field list nothing.
+    this.features = Array.isArray(d.features) ? d.features.filter((f): f is string => typeof f === 'string') : []
     return {
       webSocketUrl: fixedEndpoint ? this.o.webSocketUrl : base.replace(/^http/, 'ws') + path,
       security: { ...this.o.security, serverKey: key },
