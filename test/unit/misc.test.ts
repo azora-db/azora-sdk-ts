@@ -24,10 +24,42 @@ describe('connection strings', () => {
     expect(parseUrl(`  ws://localhost:8080?db=shop&key=${key}  `).webSocketUrl).toBe('ws://localhost:8080/rt/v1')
   })
 
+  test('http(s) URLs: the database is the last path segment, the rest is derived', () => {
+    expect(parseUrl(`https://db.example.com/shop?key=${key}`)).toEqual({
+      database: 'shop', serverKey: key, webSocketUrl: 'wss://db.example.com/rt/v1', storageUrl: 'https://db.example.com',
+    })
+    expect(parseUrl('http://127.0.0.1:8090/shop')).toEqual({ database: 'shop', webSocketUrl: 'ws://127.0.0.1:8090/rt/v1', storageUrl: 'http://127.0.0.1:8090' })
+    // A prefix before the database belongs to the server's address.
+    expect(parseUrl(`https://example.com:8443/azora/eu/shop?key=${key}`)).toMatchObject({
+      database: 'shop', webSocketUrl: 'wss://example.com:8443/azora/eu/rt/v1', storageUrl: 'https://example.com:8443/azora/eu',
+    })
+    expect(parseUrl('HTTPS://DB.Example.com/shop/?fp=azp1-aaaa-bbbb-cccc-dddd-eeee-ffff')).toEqual({
+      database: 'shop', fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff', webSocketUrl: 'wss://db.example.com/rt/v1', storageUrl: 'https://db.example.com',
+    })
+    expect(parseUrl('http://[::1]:8090/my%20shop?plaintext=1')).toEqual({
+      database: 'my shop', allowPlaintext: true, webSocketUrl: 'ws://[::1]:8090/rt/v1', storageUrl: 'http://[::1]:8090',
+    })
+    expect(resolveOptions({ url: `https://db.example.com/pre/shop?key=${key}`, token: 't' })).toMatchObject({
+      database: 'shop', webSocketUrl: 'wss://db.example.com/pre/rt/v1', storageUrl: 'https://db.example.com/pre', host: '', discovery: null, credential: 't',
+    })
+    // Options still win over the URL.
+    expect(resolveOptions({ url: `https://db.example.com/shop?key=${key}`, token: 't', storageUrl: 'https://files.example.com/' }).storageUrl).toBe('https://files.example.com')
+    expect(resolveOptions({ url: `https://db.example.com/shop?key=${key}`, token: 't', database: 'other' }).database).toBe('other')
+  })
+
   test('mistakes are named', () => {
     const cases: Array<[string, RegExp]> = [
       ['db.example.com/shop', /missing scheme/],
-      ['https://db.example.com/shop', /unsupported scheme/],
+      ['ftp://db.example.com/shop', /unsupported scheme/],
+      ['https://db.example.com', /must end with the database name/],
+      ['https://db.example.com/', /must end with the database name/],
+      ['http://localhost:8090?key=abc', /must end with the database name/],
+      ['https://db.example.com/rt/v1?db=shop', /unknown parameter "db".*last path segment/],
+      ['https://user:secret@db.example.com/shop', /user info/],
+      ['https://db.example.com/shop#frag', /fragment/],
+      ['https://db.example.com/shop?token=azk_x', /unknown parameter "token"/],
+      ['https://db.example.com/%zz', /malformed database name/],
+      ['https:///shop', /missing host/],
       ['azora://user:secret@host/shop', /user info/],
       ['azora://host/shop#frag', /fragment/],
       ['azora://host/shop?key=a&key=b', /more than once/],
