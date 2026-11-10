@@ -44,6 +44,8 @@ export interface Engine {
   dir: string
   database: string
   httpUrl: string
+  /** `http://host:port/shop`: what clients connect with, without the `?key=` parameter. */
+  connectUrl: string
   wsUrl: string
   host: string
   port: number
@@ -108,6 +110,7 @@ export async function startEngine(o: EngineOptions = {}): Promise<Engine> {
     dir,
     database: 'shop',
     httpUrl: `http://127.0.0.1:${http}`,
+    connectUrl: `http://127.0.0.1:${http}/shop`,
     wsUrl: `ws://127.0.0.1:${http}/rt/v1`,
     host: '127.0.0.1',
     port: tcp,
