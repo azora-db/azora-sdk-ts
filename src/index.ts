@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-export { connect, Database, type BatchStatement, type QueryOptions, type WriteOptions } from './database.ts'
+export { connect, connectEnv, Database, type BatchStatement, type QueryOptions, type WriteOptions } from './database.ts'
 export { parseUrl, decodeServerKey, encodeServerKey, type ConnectOptions, type CredentialProvider } from './config.ts'
 export { fingerprint, keyId } from './channel.ts'
 export type { Session } from './session.ts'
