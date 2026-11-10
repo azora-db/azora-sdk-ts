@@ -1,0 +1,13 @@
+{
+  "name": "azora-example-units",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "publish:units": "azora-units publish --env-file ../.env",
+    "start": "node --env-file=../.env shop.ts"
+  },
+  "dependencies": {
+    "@azora-db/client": "workspace:*",
+    "@azora-db/units": "workspace:*"
+  }
+}
