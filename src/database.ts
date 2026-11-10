@@ -3,11 +3,13 @@ import { Client } from './client.ts'
 import { toValue, type InputValue, type Value } from './codec.ts'
 import { resolveOptions, type ConnectOptions, type ResolvedOptions } from './config.ts'
 import { Discovery } from './discovery.ts'
+import { AzoraError, ErrorCode } from './errors.ts'
 import { LiveQuery, type LiveOptions } from './live.ts'
 import type { Session } from './session.ts'
 import { Storage } from './storage.ts'
 import { Subscription } from './subscription.ts'
 import type { ExecResult, QueryResult, Row, Statement, Stats, SubscribeSpec } from './types.ts'
+import { decodeUnitJSON, encodeUnitJSON, unitError, UnitsAdmin, type UnitCallOptions, type Units } from './units.ts'
 import { isDDL, newMutationId, type CallOptions } from './util.ts'
 
 /** Options of the query methods. */
@@ -69,24 +71,60 @@ function toObjects<T>(columns: readonly string[], rows: readonly Value[][]): T[]
  * A connection to one database. It stays connected in the background
  * (heartbeats, reconnects with backoff), so keep one per process or page
  * and share it. Every method may be called concurrently.
+ *
+ * M is the type of your units module (`Database<typeof import('./units')>`):
+ * it types {@link Database.units}. Without it `db.units` is untyped.
  */
-export class Database {
+export class Database<M = unknown> {
   /** File storage (uploads, downloads, signed URLs). */
   readonly storage: Storage
   /** The database's name. */
   readonly name: string
+  /**
+   * The published units as functions, typed from your units module when
+   * the database was opened with its type:
+   *
+   * ```ts
+   * const db = await connectEnv<typeof import('./units')>()
+   * const { orderId } = await db.units.checkout({ cartId: 'c1' })
+   * ```
+   *
+   * Only query, mutation and action units that are not internal appear.
+   * `db.units.x(args, opts)` is `db.call('x', args, opts)`.
+   */
+  readonly units: Units<M>
+  /** Publishing, rollback, the run log and secrets (an API key with the `ddl` scope). */
+  readonly unitsAdmin: UnitsAdmin
 
   private readonly clients: Client[]
+  private readonly discovery: Discovery | null
   private next = 0
 
-  private constructor(o: ResolvedOptions, clients: Client[]) {
+  private constructor(o: ResolvedOptions, clients: Client[], discovery: Discovery | null) {
     this.clients = clients
+    this.discovery = discovery
     this.name = o.database
     this.storage = new Storage(o.storageUrl, o.database, () => (clients[0] as Client).currentCredential, o.fetch)
+    const fns = new Map<string, (args?: unknown, opts?: UnitCallOptions) => Promise<unknown>>()
+    this.units = new Proxy({} as Units<M>, {
+      get: (_t, name) => {
+        if (typeof name !== 'string' || name === 'then') return undefined // not a thenable
+        let f = fns.get(name)
+        if (!f) {
+          f = (args, opts) => this.call(name, args, opts)
+          fns.set(name, f)
+        }
+        return f
+      },
+    })
+    this.unitsAdmin = new UnitsAdmin((op, body, opts) => {
+      this.checkUnits()
+      return this.pick().unitAdmin(op, body, opts)
+    })
   }
 
   /** @internal Use {@link connect}. */
-  static async open(options: ConnectOptions, call?: CallOptions): Promise<Database> {
+  static async open<M = unknown>(options: ConnectOptions, call?: CallOptions): Promise<Database<M>> {
     const o = resolveOptions(options)
     const discovery = o.discovery ? new Discovery(o) : null // one answer for the whole pool
     const clients = Array.from({ length: o.pool }, () => new Client(o, discovery))
@@ -98,7 +136,7 @@ export class Database {
       await Promise.all(clients.map((c) => c.close()))
       throw e
     }
-    return new Database(o, clients)
+    return new Database<M>(o, clients, discovery)
   }
 
   /** The client with the fewest requests in flight. */
@@ -278,6 +316,44 @@ export class Database {
     return { url: s.url, expiresAt: new Date(s.expiresAtMs) }
   }
 
+  /**
+   * Calls a published unit by name and returns its result.
+   *
+   * ```ts
+   * const { orderId } = await db.call<{ orderId: number }>('checkout', { cartId: 'c1' })
+   * ```
+   *
+   * Arguments and results travel as JSON; a Uint8Array travels as
+   * `{"$bytes": base64}` and comes back as a Uint8Array. Every call
+   * carries a mutation id (fresh unless `mutationId` is given) that is
+   * sent again unchanged after a lost connection, so a mutation runs
+   * exactly once. A unit that throws rejects with a {@link UnitError};
+   * failures around the unit (no such unit, arguments that do not match
+   * its schema, a timeout) reject with an {@link AzoraError}.
+   */
+  async call<R = unknown>(name: string, args?: unknown, opts?: UnitCallOptions): Promise<R> {
+    if (!name) throw new TypeError('azora: empty unit name')
+    let argsJSON: string
+    try {
+      argsJSON = encodeUnitJSON(args)
+    } catch (e) {
+      throw new TypeError(`azora: unit ${name}: arguments: ${(e as Error).message}`)
+    }
+    const mid = opts?.mutationId ?? newMutationId()
+    this.checkUnits()
+    const r = await this.pick().callUnit(name, argsJSON, mid, opts)
+    if (!r.ok) throw unitError(name, r.errCode, r.errMessage, r.errData)
+    return decodeUnitJSON(r.value) as R
+  }
+
+  /** Fails when the server's discovery document says it has no units. */
+  private checkUnits(): void {
+    const f = this.discovery?.features
+    if (f && !f.includes('units')) {
+      throw new AzoraError(ErrorCode.Unavailable, 'this server does not support units (its /.well-known/azora.json does not list "units" in features)')
+    }
+  }
+
   /** Replaces the credential: it is sent to the server now and used for later connections. */
   async setCredential(credential: string, opts?: CallOptions): Promise<void> {
     if (!credential) throw new TypeError('azora: empty credential')
@@ -350,16 +426,19 @@ export class Database {
  * ```
  *
  * See {@link parseUrl} for the other URL forms (raw TCP, WebSocket).
+ *
+ * Give the type of your units module to type `db.units`:
+ * `connect<typeof import('./units')>(url, { token })`.
  */
-export function connect(url: string, options?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database>
-export function connect(options: ConnectOptions & CallOptions): Promise<Database>
-export function connect(a: string | (ConnectOptions & CallOptions), b?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database> {
+export function connect<M = unknown>(url: string, options?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database<M>>
+export function connect<M = unknown>(options: ConnectOptions & CallOptions): Promise<Database<M>>
+export function connect<M = unknown>(a: string | (ConnectOptions & CallOptions), b?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database<M>> {
   const o: ConnectOptions & CallOptions = typeof a === 'string' ? { ...b, url: a } : a
   const { signal, timeoutMs, ...options } = o
   const call: CallOptions = {}
   if (signal) call.signal = signal
   if (timeoutMs !== undefined) call.timeoutMs = timeoutMs
-  return Database.open(options, call)
+  return Database.open<M>(options, call)
 }
 
 /**
@@ -377,7 +456,7 @@ export function connect(a: string | (ConnectOptions & CallOptions), b?: Omit<Con
  * Where there is no `process.env` (browsers), pass the values to
  * {@link connect}.
  */
-export async function connectEnv(options: Omit<ConnectOptions, 'url'> & CallOptions = {}): Promise<Database> {
+export async function connectEnv<M = unknown>(options: Omit<ConnectOptions, 'url'> & CallOptions = {}): Promise<Database<M>> {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
   const url = env['AZORA_URL']
   if (!url) {
@@ -390,5 +469,5 @@ export async function connectEnv(options: Omit<ConnectOptions, 'url'> & CallOpti
     if (!token) throw new TypeError('azora: connectEnv: AZORA_TOKEN is not set (an API key or a client token)')
     o.token = token
   }
-  return connect(url, o)
+  return connect<M>(url, o)
 }
