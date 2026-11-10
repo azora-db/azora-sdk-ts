@@ -1,6 +1,6 @@
 /**
  * The TypeScript SDK of Azora DB: one encrypted connection per database
- * for SQL, exactly-once writes, live queries and file storage.
+ * for SQL, exactly-once writes, live queries, file storage and units.
  *
  * @packageDocumentation
  */
@@ -21,8 +21,13 @@ export {
 } from './storage.ts'
 export {
   AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, ResyncError, RetryVerifyError, TimeoutError, UnknownOutcomeError,
-  isCode, type ErrorCodeValue,
+  isCode, UnitError, UnitErrorCode, type ErrorCodeValue, type UnitErrorCodeValue,
 } from './errors.ts'
+export {
+  UnitsAdmin, type DeployInfo, type DeployInput, type DeployResult, type JsonSchema, type UnitArgs, type UnitBrand, type UnitCallOptions,
+  type UnitFunction, type UnitInfo, type UnitKind, type UnitResult, type UnitRun, type Units, type UnitSecret, type UnitsOf, type UnitTrigger,
+  type UntypedUnits,
+} from './units.ts'
 export { CodecError, type InputValue, type Value } from './codec.ts'
 export { newMutationId, type CallOptions } from './util.ts'
 export type {
