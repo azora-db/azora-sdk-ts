@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "paths": {
+      "@azora-db/client": ["../../src/index.ts"],
+      "@azora-db/units": ["./src/index.ts"],
+      "#tcp": ["../../src/platform/tcp.node.ts"],
+      "#aead": ["../../src/platform/aead.node.ts"]
+    }
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
