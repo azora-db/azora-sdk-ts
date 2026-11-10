@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import { connect, type Database } from '../../src/index.ts'
 import { MsgType, Op, type Msg } from '../../src/messages.ts'
-import { AzoraProvider, useConnected, useLiveQuery, useQuery } from '../../src/react.ts'
+import { AzoraProvider, useConnected, useLiveQuery, useQuery, useUnit, useUnitQuery } from '../../src/react.ts'
 import { FakeServer } from '../helpers/fake-server.ts'
 import { until } from '../helpers/wait.ts'
 
@@ -122,4 +122,58 @@ test('hooks need a provider, and report a failing query', async () => {
   const bare = createRoot(document.createElement('div'))
   await expect(act(async () => bare.render(<Denied />))).rejects.toThrow(/AzoraProvider/)
   console.error = quiet
+})
+
+test('useUnit calls on demand; useUnitQuery calls again when its arguments or watched tables change', async () => {
+  let calls = 0
+  server.onMessage = (m, c) => {
+    if (m.type === MsgType.Subscribe) c.send({ type: MsgType.Subscribed, reqId: m.reqId, subId: m.subId })
+    if (m.type !== MsgType.Call) return
+    calls++
+    const args = JSON.parse(m.args || 'null') as { cartId?: string; customer?: number } | null
+    if (m.unit === 'checkout' && args?.cartId === 'bad') {
+      c.send({ type: MsgType.Returned, reqId: m.reqId, ok: false, value: '', replayed: false, errCode: 'not_found', errMessage: 'no such cart', errData: '' })
+    } else {
+      c.send({ type: MsgType.Returned, reqId: m.reqId, ok: true, value: JSON.stringify({ unit: m.unit, args, n: calls }), replayed: false, errCode: '', errMessage: '', errData: '' })
+    }
+  }
+  let checkout: ReturnType<typeof useUnit<{ unit: string; n: number }, { cartId: string }>> | undefined
+  function Shop(props: { customer: number }) {
+    checkout = useUnit<{ unit: string; n: number }, { cartId: string }>('checkout')
+    const orders = useUnitQuery<{ args: { customer: number }; n: number }>('myOrders', { customer: props.customer }, [], { watch: ['orders'] })
+    return (
+      <p data-testid="state">
+        {checkout.pending ? 'pending' : 'idle'} {checkout.error ? `error=${checkout.error.message}` : `data=${checkout.data?.unit ?? '-'}`}
+        {' '}orders={orders.data ? `${orders.data.args.customer}#${orders.data.n}` : '-'}
+      </p>
+    )
+  }
+  await render(<Shop customer={42} />)
+  await act(() => until(() => /orders=42#\d/.test(state()), 'the first query'))
+  expect(state()).toMatch(/^idle data=- orders=42#/)
+
+  let result: unknown
+  await act(async () => {
+    result = await checkout!.call({ cartId: 'c1' })
+  })
+  expect(result).toMatchObject({ unit: 'checkout', args: { cartId: 'c1' } })
+  expect(state()).toMatch(/^idle data=checkout /)
+
+  await act(async () => {
+    await expect(checkout!.call({ cartId: 'bad' })).rejects.toMatchObject({ name: 'UnitError', code: 'not_found' })
+  })
+  expect(state()).toMatch(/^idle error=no such cart /)
+
+  // New arguments: the query runs again.
+  await render(<Shop customer={7} />)
+  await act(() => until(() => /orders=7#\d/.test(state()), 'the query with new arguments'))
+
+  // A watched table was written: it runs again.
+  const before = calls
+  const watch = server.last.received.filter((m): m is Extract<Msg, { type: typeof MsgType.Subscribe }> => m.type === MsgType.Subscribe && m.kind === 5).at(-1)!
+  await act(async () => {
+    server.last.send({ type: MsgType.Batch, subId: watch.subId, snapshot: false, reset: false, checkpoint: 1, epoch: 0n, tables: ['orders'], changes: [] })
+    await until(() => calls > before, 'the query to run again')
+  })
+  await act(() => until(() => state().endsWith(`orders=7#${calls}`), 'the new result'))
 })
