@@ -2,8 +2,10 @@
 
 `@azora-db/client` connects JavaScript and TypeScript programs to an
 [Azora DB](../azora-engine) database: SQL, writes that apply exactly once,
-live queries, change notifications and file storage, over one connection
-that is encrypted end to end and kept alive for you.
+live queries, change notifications, file storage and
+[units](#units) (your own TypeScript functions, published into the
+database and called like an API), over one connection that is encrypted
+end to end and kept alive for you.
 
 It runs in Node 22+, Bun, Deno and browsers. It has three small
 dependencies (the audited `@noble` cryptography libraries) and optional
@@ -25,6 +27,7 @@ live.subscribe(() => render(live.rows)) // every change, as it commits
 - [Connecting](#connecting)
 - [Reading](#reading) · [Writing](#writing)
 - [Live queries](#live-queries) · [Subscriptions](#subscriptions) · [Watching tables](#watching-tables)
+- [Units](#units)
 - [React](#react)
 - [File storage](#file-storage)
 - [Errors, timeouts and cancellation](#errors-timeouts-and-cancellation)
@@ -308,6 +311,91 @@ const stop = await db.watch(['orders', 'refunds'], async () => {
 The listener receives the tables that changed; `['*']` means "anything may
 have changed" (after a reconnect, for example).
 
+## Units
+
+Units are functions you write in TypeScript in your own repository and
+publish into a database, with the
+[`@azora-db/units`](packages/units/README.md) package and its
+`azora-units` CLI. They run inside the engine, next to the data, and any
+client of the database calls them by name. A `mutation` is one
+transaction (all or nothing) that runs exactly once per call, even when
+the call is retried. The engine's
+[`docs/units.md`](../azora-engine/docs/units.md) describes them in full.
+
+```ts
+// units/index.ts
+import { mutation, query, v, UnitError } from '@azora-db/units'
+
+export const myOrders = query({
+  handler: (ctx) => ctx.db.all('SELECT * FROM orders WHERE customer = ?', ctx.auth.subject),
+})
+
+export const checkout = mutation({
+  args: { cartId: v.string() },
+  handler(ctx, { cartId }) {
+    const cart = ctx.db.one<{ owner: string; total: number }>('SELECT * FROM carts WHERE id = ?', cartId)
+    if (!cart) throw new UnitError('not_found', 'no such cart')
+    const { lastInsertId } = ctx.db.exec('INSERT INTO orders(customer, total) VALUES (?, ?)', cart.owner, cart.total)
+    ctx.db.exec('DELETE FROM carts WHERE id = ?', cartId)
+    return { orderId: lastInsertId }
+  },
+})
+```
+
+```sh
+npx azora-units publish        # bundles units/ and publishes it (an API key with the ddl scope)
+```
+
+**Calling.** Give `connect` or `connectEnv` the type of your units module
+and `db.units` is typed from your source: arguments from the validators,
+results from what the handlers return. `db.call` takes any name, untyped.
+
+```ts
+const db = await connectEnv<typeof import('./units')>()
+const { orderId } = await db.units.checkout({ cartId: 'c1' })   // { cartId: string } => { orderId: number }
+const orders = await db.units.myOrders()
+await db.call<{ orderId: number }>('checkout', { cartId: 'c1' }, { mutationId: 'cart-c1' })
+```
+
+`typeof import('./units')` is only a type: nothing of the units' code
+ends up in your client bundle. Only queries, mutations and actions that
+are not `internal` appear on `db.units`. Without the type argument
+`Database` is unchanged and `db.units.x` is untyped.
+
+- **Any credential can call**, including a client token limited to some
+  tables or rows, which cannot run SQL: the unit decides what the caller
+  may do from `ctx.auth` (its kind, principal, subject, scopes, claims).
+  This is how a browser does controlled writes.
+- **Every call carries a fresh mutation id** and is sent again with the
+  same id after a lost connection, so retries are always safe; pass your
+  own `mutationId` to keep that across restarts of your process.
+- Arguments and results are JSON. A `Uint8Array` travels as
+  `{"$bytes": base64}` and comes back as a `Uint8Array`; bigints are sent
+  as numbers (integers lose precision beyond 2^53).
+- A unit that throws rejects with a **`UnitError`**: `code` (`invalid`,
+  `not_found`, `permission_denied`, `conflict`, `failed`), `message`,
+  `data` (the JSON value the unit attached) and `unit`. Failures around
+  the unit are an `AzoraError` as usual: `not_found` (no such unit, or
+  nothing published), `permission_denied` (an internal unit), `invalid`
+  (arguments that do not match the unit's schema, or a value too large),
+  `resource_exhausted` (a timeout or a limit), `unavailable`.
+- A connection whose URL had no `?key=` read the server's discovery
+  document; when it does not list `"units"`, `db.call` rejects at once
+  with `unavailable: this server does not support units`.
+
+**Operating** (an API key with the `ddl` scope): `db.unitsAdmin` has
+`deploy`, `list`, `deploys`, `activate` (rollback), `call` (runs any unit
+as the caller, internal ones too), `runs` (the run log), `triggers`,
+`skipTrigger` and `secrets.list/set/unset`. Operations that change
+something are not sent again after a lost connection (the call rejects
+with `UnknownOutcomeError`); reads are. Most of the time the
+`azora-units` CLI does this for you: `publish`, `dev`, `list`, `history`,
+`rollback`, `call`, `logs --follow`, `secrets`, `types --go`.
+
+[`examples/units`](examples/units) is a complete shop: a customer token
+that cannot run SQL checks out its own cart through a unit, an internal
+unit called with `ctx.run`, an `onChange` unit and a `schedule`.
+
 ## React
 
 ```tsx
@@ -326,6 +414,19 @@ function Orders() {
 `useLiveQuery` re-renders after every consistent step; `useQuery` runs a
 read and runs it again when a watched table is written. A complete app is
 in [`examples/web`](examples/web).
+
+For [units](#units), `useUnit(name)` calls one on demand and
+`useUnitQuery(name, args, deps, { watch })` calls one and calls it again
+when its arguments (compared by value) or `deps` change, or a watched
+table is written. `useAzora<typeof import('./units')>()` returns a
+database with a typed `db.units`.
+
+```tsx
+const checkout = useUnit<{ orderId: number }, { cartId: string }>('checkout')   // { call, pending, error, data }
+<button disabled={checkout.pending} onClick={() => checkout.call({ cartId })}>Pay</button>
+
+const { data: orders, loading } = useUnitQuery<Order[]>('myOrders', {}, [], { watch: ['orders'] })
+```
 
 ## File storage
 
@@ -371,7 +472,8 @@ links with the rows.
 | `HandshakeError` | The server could not prove it holds the expected key. |
 | `ConnectionError` | The server could not be reached, or did not report its key for a URL without one (only from `connect`). |
 | `TimeoutError` | The call ran past its timeout. When the client was disconnected, the message says why. |
-| `UnknownOutcomeError` | A schema change was sent and the connection dropped before its answer. |
+| `UnitError` | A [unit](#units) threw: `code`, `message`, `data`, `unit`. |
+| `UnknownOutcomeError` | A schema change (or a `unitsAdmin` change) was sent and the connection dropped before its answer. |
 | `ClosedError` | The database or subscription was closed. |
 
 Every call takes `{ signal, timeoutMs }`. Rate limits (`resource_exhausted`
@@ -446,6 +548,7 @@ connects with those two values (`connectEnv()`).
 | [`files.ts`](examples/files.ts) | uploads, signed URLs, resumable upload, ranges, through the same URL |
 | [`tokens.ts`](examples/tokens.ts) | the same URL with a client token pinned to one customer's rows |
 | [`watch.ts`](examples/watch.ts) | an aggregate kept fresh with `watch` |
+| [`units/`](examples/units) | units: publish a shop's units, call them with the API key and with a customer token that cannot run SQL (`node --env-file=examples/.env examples/units/shop.ts`) |
 | [`web/`](examples/web) | a React orders board in the browser: `cd examples/web && pnpm install && pnpm dev` |
 
 The dev engine needs the engine binary: set `AZORA_BIN`, or build
@@ -457,9 +560,14 @@ The dev engine needs the engine binary: set `AZORA_BIN`, or build
 pnpm typecheck
 pnpm test          # unit tests, and integration tests against a real engine
 pnpm test:fast     # without the million-frame rekey test (about 90 s)
-pnpm build         # dist/, with type declarations
+pnpm test:units    # the @azora-db/units package alone
+pnpm build         # dist/, with type declarations (both packages)
 pnpm bench
 ```
+
+The repository is a pnpm workspace: the root is `@azora-db/client`,
+[`packages/units`](packages/units) is `@azora-db/units`, and
+`examples/units` uses both.
 
 Unit tests need nothing: they check the codec byte for byte against
 vectors written by the Go implementation (`test/fixtures/messages.txt`),
@@ -470,13 +578,16 @@ rotation. Integration tests start `azora serve` on a temporary data root
 (they are skipped when there is no engine binary) and cover every URL
 form and handshake over both transports, discovery of the server key on
 loopback, restarts and crashes of the server mid-stream, key rotation,
-token refresh and file storage.
+token refresh, file storage and units (publishing, calls with an API key
+and a restricted token, exactly-once mutations, the admin operations and
+the CLI; those are skipped when the engine does not list `"units"` in its
+discovery document).
 
 The wire protocol is specified in the engine's
 [`docs/protocol.md`](../azora-engine/docs/protocol.md). Source layout:
 
 ```
-src/codec.ts, messages.ts     binary encoding and the 23 message types
+src/codec.ts, messages.ts     binary encoding and the 27 message types
 src/noise.ts, channel.ts      Noise IK/XX, framing, chunking, rekeying
 src/transport.ts, platform/   WebSocket; TCP and native cipher for Node
 src/config.ts, discovery.ts   options, connection URLs, the server key of a URL without one
@@ -484,5 +595,7 @@ src/session.ts, client.ts     one connection: heartbeat, reconnect, retries, cre
 src/subscription.ts           staging at checkpoints, resume, acknowledgement, verify
 src/live.ts, replica.ts       live queries and in-memory copies
 src/database.ts               the public API; src/react.ts the hooks
+src/units.ts                  unit calls: JSON with blobs, db.units types, the admin facade
 src/storage.ts                the HTTP file API
+packages/units/               @azora-db/units: unit helpers, validators, ctx types, the CLI
 ```
