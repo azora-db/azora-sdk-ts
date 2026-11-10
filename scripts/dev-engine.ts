@@ -30,27 +30,29 @@ const engine = await startEngine({
   },
 })
 
+// What clients connect with: the URL is public, the tokens are private.
+const url = `${engine.connectUrl}?key=${engine.serverKey}`
 const env = [
-  `AZORA_URL=${engine.tcpUrl}?key=${engine.serverKey}`,
-  `AZORA_WS_URL=${engine.wsUrl}?db=shop&key=${engine.serverKey}`,
-  `AZORA_STORAGE_URL=${engine.httpUrl}`,
-  `AZORA_API_KEY=${engine.apiKey}`,
+  `AZORA_URL=${url}`,
+  `AZORA_TOKEN=${engine.apiKey}`,
   `AZORA_TOKEN_CUSTOMER42=${engine.tokens['customer42']}`,
-  `VITE_AZORA_WS_URL=${engine.wsUrl}?db=shop&key=${engine.serverKey}`,
+  `VITE_AZORA_URL=${url}`,
   `VITE_AZORA_TOKEN=${engine.tokens['web']}`,
+  `AZORA_TCP_URL=${engine.tcpUrl}?key=${engine.serverKey}`,
 ].join('\n')
 const file = fileURLToPath(new URL('../examples/.env', import.meta.url))
 writeFileSync(file, env + '\n')
 
 console.log(`Azora engine is serving the "shop" database.
 
-  TCP        ${engine.tcpUrl}
-  WebSocket  ${engine.wsUrl}
-  Storage    ${engine.httpUrl}
-  Server key ${engine.serverKey}
+  AZORA_URL  ${url}
+  Raw TCP    ${engine.tcpUrl}?key=${engine.serverKey}
   Data root  ${engine.dir}
 
-Wrote ${file}. Run an example in another terminal:
+Wrote AZORA_URL, AZORA_TOKEN and the examples' tokens to
+${file}
+
+Run an example in another terminal:
 
   node --env-file=examples/.env examples/quickstart.ts
 
