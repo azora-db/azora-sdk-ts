@@ -15,11 +15,14 @@
  *
  * @packageDocumentation
  */
-import { createContext, createElement, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode,
+} from 'react'
 import type { InputValue } from './codec.ts'
 import type { Database } from './database.ts'
 import type { LiveOptions, LiveQuery } from './live.ts'
 import type { Row, Statement } from './types.ts'
+import type { UnitCallOptions } from './units.ts'
 
 const Context = createContext<Database | null>(null)
 
@@ -28,12 +31,19 @@ export function AzoraProvider(props: { db: Database; children?: ReactNode }): Re
   return createElement(Context.Provider, { value: props.db }, props.children)
 }
 
-/** The database given to the nearest {@link AzoraProvider}. */
-export function useAzora(): Database {
+/**
+ * The database given to the nearest {@link AzoraProvider}. Pass your
+ * units module type to get a typed `db.units`: `useAzora<typeof import('./units')>()`.
+ */
+export function useAzora<M = unknown>(): Database<M> {
   const db = useContext(Context)
   if (!db) throw new Error('azora: useAzora needs an <AzoraProvider db={...}> above it')
-  return db
+  return db as Database<M>
 }
+
+const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)))
+const valueKey = (v: unknown): string =>
+  JSON.stringify(v ?? null, (_k, x: unknown) => (typeof x === 'bigint' ? `${x}n` : x instanceof Uint8Array ? Array.from(x) : x))
 
 const EMPTY: readonly never[] = Object.freeze([])
 
@@ -186,4 +196,133 @@ export function useConnected(pollMs = 500): boolean {
     return () => clearInterval(t)
   }, [db, pollMs])
   return connected
+}
+
+/** What {@link useUnit} returns. */
+export interface UnitState<R, A> {
+  /**
+   * Calls the unit. It resolves with the result and rejects with the
+   * error, which `error` also holds until the next call.
+   */
+  call: (args?: A, opts?: UnitCallOptions) => Promise<R>
+  /** A call is in flight. */
+  pending: boolean
+  /** Why the last call failed (a `UnitError` when the unit threw). */
+  error: Error | null
+  /** The last call's result. */
+  data: R | undefined
+}
+
+/**
+ * Calls a unit on demand (a mutation from a form, for example):
+ *
+ * ```tsx
+ * const checkout = useUnit<{ orderId: number }, { cartId: string }>('checkout')
+ * <button disabled={checkout.pending} onClick={() => checkout.call({ cartId })}>Pay</button>
+ * ```
+ *
+ * With several calls in flight, `data` and `error` follow the latest.
+ * `UnitResult` and `UnitArgs` give the types from your units module.
+ */
+export function useUnit<R = unknown, A = any>(name: string): UnitState<R, A> {
+  const db = useAzora()
+  const [state, setState] = useState<{ pending: boolean; error: Error | null; data: R | undefined }>({ pending: false, error: null, data: undefined })
+  const seq = useRef(0)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const call = useCallback(
+    async (args?: A, opts?: UnitCallOptions): Promise<R> => {
+      const n = ++seq.current
+      setState((s) => ({ ...s, pending: true, error: null }))
+      try {
+        const data = await db.call<R>(name, args, opts)
+        if (mounted.current && n === seq.current) setState({ pending: false, error: null, data })
+        return data
+      } catch (e) {
+        if (mounted.current && n === seq.current) setState((s) => ({ ...s, pending: false, error: toError(e) }))
+        throw e
+      }
+    },
+    [db, name],
+  )
+  return { call, ...state }
+}
+
+/** What {@link useUnitQuery} returns. */
+export interface UnitQueryState<R> {
+  data: R | undefined
+  loading: boolean
+  error: Error | null
+  /** Calls the unit again now. */
+  refetch: () => void
+}
+
+/**
+ * Calls a unit (a query) and calls it again when `args` change (compared
+ * by value), when one of `deps` changes, or when one of `options.watch`'s
+ * tables is written:
+ *
+ * ```tsx
+ * const { data: orders } = useUnitQuery<Order[]>('myOrders', {}, [], { watch: ['orders'] })
+ * ```
+ */
+export function useUnitQuery<R = unknown, A = any>(
+  name: string,
+  args?: A,
+  deps: readonly unknown[] = [],
+  options: { watch?: readonly string[]; enabled?: boolean } = {},
+): UnitQueryState<R> {
+  const db = useAzora()
+  const { watch = [], enabled = true } = options
+  const key = valueKey([name, args === undefined ? '\u0000none' : args, deps, watch])
+  const [state, setState] = useState<{ data: R | undefined; loading: boolean; error: Error | null }>({ data: undefined, loading: enabled, error: null })
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    let stop: (() => Promise<void>) | undefined
+    let running = false
+    let again = false
+    const run = (): void => {
+      if (running) {
+        again = true
+        return
+      }
+      running = true
+      setState((s) => ({ ...s, loading: true }))
+      db.call<R>(name, args).then(
+        (data) => !cancelled && setState({ data, loading: false, error: null }),
+        (e: unknown) => !cancelled && setState((s) => ({ ...s, loading: false, error: toError(e) })),
+      ).finally(() => {
+        running = false
+        if (again && !cancelled) {
+          again = false
+          run()
+        }
+      })
+    }
+    run()
+    if (watch.length > 0) {
+      db.watch(watch, run).then(
+        (s) => {
+          if (cancelled) void s()
+          else stop = s
+        },
+        () => {},
+      )
+    }
+    return () => {
+      cancelled = true
+      void stop?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, key, enabled, tick])
+
+  return { ...state, refetch: () => setTick((t) => t + 1) }
 }
