@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { connect, newMutationId, type BatchStatement, type Database } from '@azora-db/client'
+import { connectEnv, newMutationId, type BatchStatement, type Database } from '@azora-db/client'
 
 const OUTBOX = join(tmpdir(), 'azora-example-outbox.json')
 
@@ -38,10 +38,7 @@ async function flush(db: Database): Promise<void> {
 const balances = async (db: Database): Promise<string> =>
   (await db.query<{ id: string; balance: number }>('SELECT id, balance FROM accounts ORDER BY id')).map((a) => `${a.id}=${a.balance}`).join('  ')
 
-const url = process.env['AZORA_URL']!
-const apiKey = process.env['AZORA_API_KEY']!
-
-let db = await connect(url, { apiKey })
+let db = await connectEnv() // AZORA_URL and AZORA_TOKEN
 console.log('before:        ', await balances(db))
 
 // 1. Persist the intent with its id BEFORE sending it.
@@ -55,7 +52,7 @@ await db.close()
 console.log('crashed after sending; the outbox still holds the transfer')
 
 // 3. On restart, replay the outbox with the stored ids.
-db = await connect(url, { apiKey })
+db = await connectEnv()
 console.log('replaying the outbox:')
 await flush(db)
 console.log('after:         ', await balances(db))
