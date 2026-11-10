@@ -134,7 +134,8 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
     await expect(connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: 'azk_nope_nope' })).rejects.toMatchObject({ code: 'unauthenticated' })
     await expect(connect(`azora://127.0.0.1:${engine.port}/nosuchdb?key=${engine.serverKey}`, { apiKey: engine.apiKey })).rejects.toBeInstanceOf(AzoraError)
     await expect(connect('azora://127.0.0.1:1/shop?plaintext=1', { apiKey: 'x', timeoutMs: 2000 })).rejects.toThrow()
-    await expect(connect('http://x/shop', { apiKey: 'x' })).rejects.toThrow(/unsupported scheme/)
+    await expect(connect('ftp://x/shop', { apiKey: 'x' })).rejects.toThrow(/unsupported scheme/)
+    await expect(connect('http://db.example.com/shop', { apiKey: 'x' })).rejects.toThrow(/add \?key=<server key> to the URL/)
     await expect(connect(engine.tcpUrl, { apiKey: 'x' })).rejects.toThrow(/serverKey/)
   })
 
