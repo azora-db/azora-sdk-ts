@@ -56,7 +56,9 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
 
   test('without a key, the loopback server is asked for it', async () => {
     const doc = (await (await fetch(`${engine.httpUrl}/.well-known/azora.json`)).json()) as Record<string, unknown>
-    expect(doc).toEqual({ azora: 1, server_key: engine.serverKey, fingerprint: engine.fingerprint, websocket: '/rt/v1' })
+    const { features, ...rest } = doc
+    expect(rest).toEqual({ azora: 1, server_key: engine.serverKey, fingerprint: engine.fingerprint, websocket: '/rt/v1' })
+    if (features !== undefined) expect(features).toBeInstanceOf(Array) // optional features ("units"), newer engines only
 
     const { fetch: counting, urls } = countingFetch()
     const db = keep(await connect(engine.connectUrl, { token: engine.apiKey, fetch: counting }))
