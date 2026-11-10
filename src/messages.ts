@@ -31,6 +31,10 @@ export const MsgType = {
   GoAway: 21,
   Shape: 22,
   OK: 23,
+  Call: 24,
+  Returned: 25,
+  UnitAdmin: 26,
+  UnitAdminResult: 27,
 } as const
 
 /** Subscription kinds on the wire. */
@@ -135,10 +139,28 @@ export interface Signed { type: typeof MsgType.Signed; reqId: number; url: strin
 export interface GoAway { type: typeof MsgType.GoAway; reason: string; retryAfterMs: number }
 export interface Shape { type: typeof MsgType.Shape; table: string; tv: number; columns: string[]; pk: string[] }
 export interface OK { type: typeof MsgType.OK; reqId: number }
+/** Runs a published unit; args is JSON text ("" for none). */
+export interface Call { type: typeof MsgType.Call; reqId: number; unit: string; args: string; mutationId: string }
+/** Answers Call: the unit's result (ok) or the error it threw; value and errData are JSON text. */
+export interface Returned {
+  type: typeof MsgType.Returned
+  reqId: number
+  ok: boolean
+  value: string
+  replayed: boolean
+  errCode: string
+  errMessage: string
+  errData: string
+}
+/** Manages a database's units (scope ddl); body is the op's JSON request. */
+export interface UnitAdmin { type: typeof MsgType.UnitAdmin; reqId: number; op: string; body: string }
+/** Answers UnitAdmin with the JSON text of its result. */
+export interface UnitAdminResult { type: typeof MsgType.UnitAdminResult; reqId: number; body: string }
 
 export type Msg =
   | Hello | Welcome | ErrorMsg | Ping | Pong | Auth | Subscribe | Subscribed | Unsubscribe | Batch | SubEnd | Ack
   | Query | Exec | Tx | Result | Verify | Verified | Sign | Signed | GoAway | Shape | OK
+  | Call | Returned | UnitAdmin | UnitAdminResult
 
 function writeFilter(w: Writer, f: WireFilter | null): void {
   if (!f) return w.flag(false)
@@ -243,6 +265,18 @@ export function encode(m: Msg, w = new Writer(128)): Uint8Array {
     case MsgType.OK:
       w.u(m.reqId)
       break
+    case MsgType.Call:
+      w.u(m.reqId); w.s(m.unit); w.s(m.args); w.s(m.mutationId)
+      break
+    case MsgType.Returned:
+      w.u(m.reqId); w.flag(m.ok); w.s(m.value); w.flag(m.replayed); w.s(m.errCode); w.s(m.errMessage); w.s(m.errData)
+      break
+    case MsgType.UnitAdmin:
+      w.u(m.reqId); w.s(m.op); w.s(m.body)
+      break
+    case MsgType.UnitAdminResult:
+      w.u(m.reqId); w.s(m.body)
+      break
   }
   return w.finish()
 }
@@ -343,6 +377,16 @@ function readBody(type: number, r: Reader): Msg {
       return { type, table: r.s(), tv: r.iNum(), columns: r.strs(), pk: r.strs() }
     case MsgType.OK:
       return { type, reqId: r.u32() }
+    case MsgType.Call:
+      return { type, reqId: r.u32(), unit: r.s(), args: r.s(), mutationId: r.s() }
+    case MsgType.Returned:
+      return {
+        type, reqId: r.u32(), ok: r.flag(), value: r.s(), replayed: r.flag(), errCode: r.s(), errMessage: r.s(), errData: r.s(),
+      }
+    case MsgType.UnitAdmin:
+      return { type, reqId: r.u32(), op: r.s(), body: r.s() }
+    case MsgType.UnitAdminResult:
+      return { type, reqId: r.u32(), body: r.s() }
   }
   throw new CodecError(`unknown type ${type}`)
 }
