@@ -88,6 +88,9 @@ export class KeyedServer {
           ch.send(encode({
             type: MsgType.Result, reqId: m.reqId, columns: ['v'], rows: [[m.sql]], truncated: false, rowsAffected: 0, lastInsertId: 0, replayed: false,
           }))
+        } else if (m.type === MsgType.Call) {
+          // A unit that returns its arguments.
+          ch.send(encode({ type: MsgType.Returned, reqId: m.reqId, ok: true, value: m.args, replayed: false, errCode: '', errMessage: '', errData: '' }))
         }
       }
       ch.start(keys.send, keys.recv, [], null)
