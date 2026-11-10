@@ -12,7 +12,7 @@ React bindings.
 ```ts
 import { connect, sql } from '@azora-db/client'
 
-const db = await connect('azora://db.example.com/shop?key=<server key>', { apiKey: process.env.AZORA_API_KEY })
+const db = await connect('https://db.example.com/shop?key=<server key>', { token: process.env.AZORA_TOKEN })
 
 const open = await db.query<Order>('SELECT * FROM orders WHERE status = ?', ['open'])
 await db.exec(sql`UPDATE orders SET status = 'paid' WHERE id = ${open[0].id}`)
@@ -44,56 +44,106 @@ constructor with the `webSocket` option.
 
 ## Connecting
 
-`connect` resolves once the first connection is up, and rejects with the
-reason otherwise (wrong server key, refused credential, unreachable
-server). After that the client reconnects by itself, with exponential
-backoff and jitter. Keep one `Database` per process or page and share it.
+A client needs two values:
+
+| Value | | What it is |
+|---|---|---|
+| `AZORA_URL` | public | Where the database is: `https://db.example.com/shop?key=<server key>` |
+| `AZORA_TOKEN` | private | Who the client is: an API key (`azk_…`) or a client token (`azt1.…`) |
 
 ```ts
-// Servers: raw TCP, an API key.
-const db = await connect('azora://db.example.com:7480/shop?key=<server key>', { apiKey })
+import { connect, connectEnv } from '@azora-db/client'
 
-// Browsers and apps: WebSocket, a short-lived token from your backend.
-const db = await connect('wss://db.example.com/rt/v1?db=shop&key=<server key>', {
+const db = await connect('https://db.example.com/shop?key=<server key>', { token: process.env.AZORA_TOKEN })
+const db = await connectEnv()   // reads AZORA_URL and AZORA_TOKEN
+```
+
+On the server, `azora connect <database> --key <name>` creates an API key
+and prints both lines, ready for a `.env` file (run it while the server
+is stopped; `--url` sets the address when `storage.public_url` is not
+configured).
+
+`connect` resolves once the first connection is up, and rejects with the
+reason otherwise (wrong server key, refused token, unreachable server).
+After that the client reconnects by itself, with exponential backoff and
+jitter. Keep one `Database` per process or page and share it.
+
+**The URL** is the engine's HTTP address with the database as the last
+path segment, and the server's public key:
+
+```
+http(s)://host[:port][/prefix]/<database>?key=<server key>
+```
+
+Nothing in it is secret: it can live in source code and ship in a browser
+bundle. The SDK finds the rest from it: the connection is a WebSocket to
+`/rt/v1` under that address (so the same URL works in servers and in
+browsers), and [file storage](#file-storage) uses the same address.
+
+**The server is authenticated by its key, not by a certificate.** Frames
+are encrypted inside the WebSocket, so a TLS-terminating proxy or CDN only
+sees ciphertext. The URL says how the key is checked:
+
+| In the URL | Handshake | Use |
+|---|---|---|
+| `?key=<server key>` | Noise IK, one round trip | Pin the server's public key. The connection fails unless the server holds the private key. |
+| `?fp=azp1-…` | Noise XX | The server sends its key and the client checks the fingerprint. |
+| no key | Noise IK | The client first reads the key from `<address>/.well-known/azora.json`. **Only over `https` or to a loopback address.** |
+| `?plaintext=1` | none | Tests and loopback only; the server and the database must allow it too. |
+
+A URL without a key (`https://db.example.com/shop`) trusts the TLS
+certificate to vouch for the key the server reports, so it is accepted
+only over `https`, or for `localhost`, `127.x.x.x` and `::1`. Over plain
+`http` to any other host nothing proves that the answer comes from the
+right server: `connect` fails before sending anything and asks for
+`?key=`. When a reconnect fails the handshake, the key is read again (the
+server's key may have been rotated). A key pinned with `?key=` does not
+depend on the certificate and is never replaced.
+
+**The token** is an API key (scopes `read`, `write`, `ddl`, `admin`) for
+servers, or a client token your backend mints for one user, optionally
+limited to tables and pinned to filters (`azora realtime token create shop
+--sub user:42 --table orders --filter "orders: customer = 42"`). Both go
+in the `token` option (`apiKey` is another name for it), with the same
+URL:
+
+```ts
+// A browser or an app: the public URL, and a short-lived token from your backend.
+const db = await connect(import.meta.env.VITE_AZORA_URL, {
   token: () => fetch('/api/azora-token').then((r) => r.text()),
 })
 ```
 
+Pass a function and it is called on every reconnect and when the server
+reports that the token expired: the new token is sent on the open
+connection, and subscriptions continue. A token is never read from a URL.
+
+`connectEnv(options?)` reads `process.env`: `AZORA_URL`, and `AZORA_TOKEN`
+(or `AZORA_API_KEY` when that is not set). It rejects with an error that
+names the missing variable. Browsers have no `process.env`: pass the
+values to `connect`.
+
+**Raw TCP and other forms.** Server runtimes can also connect to the
+engine's TCP port, which is somewhat faster than the WebSocket (see
+[Performance](#performance)). These URLs name the realtime endpoint
+itself and always carry `key`, `fp` or `plaintext`; with `azora://`, file
+storage needs the `storageUrl` option:
+
 | Connection string | Transport |
 |---|---|
 | `azora://host[:7480]/<database>?key=…` | TCP (Node, Bun, Deno) |
-| `wss://host[/rt/v1]?db=<database>&key=…` | WebSocket over TLS (every runtime) |
+| `wss://host[/rt/v1]?db=<database>&key=…` | WebSocket over TLS, the endpoint given directly |
 | `ws://host[/rt/v1]?db=<database>&key=…` | plain WebSocket |
 | `azoras+ws://…`, `azora+ws://…` | the same two, in the engine's own spelling |
 
-Every part can also be an option (`host`, `port`, `webSocketUrl`,
-`database`, `serverKey`, …); options win over the URL. Credentials are
-never read from a URL.
-
-**The server is authenticated by its key, not by a certificate.** `azora
-serve` prints the key and its fingerprint (`azora keys show` prints them
-again):
-
-| Option | Handshake | Use |
-|---|---|---|
-| `?key=` / `serverKey` | Noise IK, one round trip | Pin the server's public key. The connection fails unless the server holds the private key. |
-| `?fp=` / `fingerprint` | Noise XX | The server sends its key and the client checks the fingerprint (`azp1-…`). |
-| `?plaintext=1` / `allowPlaintext` | none | Tests and loopback only; the server and the database must allow it too. |
-
-Frames are encrypted inside the WebSocket as well, so a TLS-terminating
-proxy or CDN only sees ciphertext.
-
-**Credentials.** `apiKey` (`azk_…`, scopes `read`, `write`, `ddl`,
-`admin`) is for servers. `token` is a client token (`azt1.…`) your backend
-mints for one user, optionally limited to tables and pinned to filters
-(`azora realtime token create shop --sub user:42 --table orders --filter
-"orders: customer = 42"`). Pass a function and it is called on every
-reconnect and when the server reports that the token expired: the new
-token is sent on the open connection, and subscriptions continue.
+Every part of a URL can also be an option (`host`, `port`, `webSocketUrl`,
+`database`, `serverKey`, `fingerprint`, `storageUrl`, …); options win over
+the URL. `azora serve` prints the server key and its fingerprint, and
+`azora keys show` prints them again.
 
 Other options: `pool`, `requestTimeoutMs` (30 s), `reconnectMinMs` /
-`reconnectMaxMs` (100 ms / 30 s), `clientName`, `storageUrl`, and the
-hooks `onConnect`, `onDisconnect`, `onResync`, `onError`.
+`reconnectMaxMs` (100 ms / 30 s), `clientName`, `fetch`, `webSocket`, and
+the hooks `onConnect`, `onDisconnect`, `onResync`, `onError`.
 
 `db.session` describes the current session (principal, scopes, security
 mode, server key); `db.connected`, `db.stats` and `db.ping()` report on
@@ -280,9 +330,10 @@ in [`examples/web`](examples/web).
 ## File storage
 
 Files live in the database's storage and can be referenced from rows
-(`FILE` columns). `db.storage` talks to the engine's HTTP server, so it
-needs its address (`storageUrl`; derived automatically from a WebSocket
-URL) and an API key.
+(`FILE` columns). `db.storage` talks to the engine's HTTP server at the
+address of the connection URL, so there is nothing else to configure (an
+`azora://` connection needs the `storageUrl` option). It needs an API
+key.
 
 ```ts
 const obj = await db.storage.upload(file, { path: 'avatars/42.png' })       // Blob, bytes, string or stream
@@ -318,7 +369,7 @@ links with the rows.
 |---|---|
 | `AzoraError` | The server refused the request. `code` is stable: `invalid` (bad SQL, constraint), `unauthenticated`, `permission_denied`, `not_found`, `resource_exhausted`, `unavailable`, `gone`, `conflict`, `internal`. `isCode(err, 'invalid')` narrows. |
 | `HandshakeError` | The server could not prove it holds the expected key. |
-| `ConnectionError` | The server could not be reached (only from `connect`). |
+| `ConnectionError` | The server could not be reached, or did not report its key for a URL without one (only from `connect`). |
 | `TimeoutError` | The call ran past its timeout. When the client was disconnected, the message says why. |
 | `UnknownOutcomeError` | A schema change was sent and the connection dropped before its answer. |
 | `ClosedError` | The database or subscription was closed. |
@@ -384,13 +435,16 @@ pnpm dev:engine                                          # a seeded local engine
 node --env-file=examples/.env examples/quickstart.ts     # in another terminal
 ```
 
+`examples/.env` holds `AZORA_URL` and `AZORA_TOKEN`, and every example
+connects with those two values (`connectEnv()`).
+
 | Example | Shows |
 |---|---|
-| [`quickstart.ts`](examples/quickstart.ts) | connect, query, `sql`, exec, batch |
+| [`quickstart.ts`](examples/quickstart.ts) | `connectEnv`, query, `sql`, exec, batch |
 | [`live-orders.ts`](examples/live-orders.ts) | a live query in the terminal, checksum verification |
 | [`exactly-once.ts`](examples/exactly-once.ts) | an outbox with persisted mutation ids replayed after a crash |
-| [`files.ts`](examples/files.ts) | uploads, signed URLs, resumable upload, ranges |
-| [`tokens.ts`](examples/tokens.ts) | a client token pinned to one customer's rows |
+| [`files.ts`](examples/files.ts) | uploads, signed URLs, resumable upload, ranges, through the same URL |
+| [`tokens.ts`](examples/tokens.ts) | the same URL with a client token pinned to one customer's rows |
 | [`watch.ts`](examples/watch.ts) | an aggregate kept fresh with `watch` |
 | [`web/`](examples/web) | a React orders board in the browser: `cd examples/web && pnpm install && pnpm dev` |
 
@@ -411,10 +465,12 @@ Unit tests need nothing: they check the codec byte for byte against
 vectors written by the Go implementation (`test/fixtures/messages.txt`),
 run both Noise handshakes against an in-process peer, and drive the client
 with a scripted server that drops connections, rate-limits and expires
-credentials. Integration tests start `azora serve` on a temporary data
-root (they are skipped when there is no engine binary) and cover every
-handshake over both transports, restarts and crashes of the server
-mid-stream, token refresh and file storage.
+credentials, and one that holds a real key for discovery and key
+rotation. Integration tests start `azora serve` on a temporary data root
+(they are skipped when there is no engine binary) and cover every URL
+form and handshake over both transports, discovery of the server key on
+loopback, restarts and crashes of the server mid-stream, key rotation,
+token refresh and file storage.
 
 The wire protocol is specified in the engine's
 [`docs/protocol.md`](../azora-engine/docs/protocol.md). Source layout:
@@ -423,6 +479,7 @@ The wire protocol is specified in the engine's
 src/codec.ts, messages.ts     binary encoding and the 23 message types
 src/noise.ts, channel.ts      Noise IK/XX, framing, chunking, rekeying
 src/transport.ts, platform/   WebSocket; TCP and native cipher for Node
+src/config.ts, discovery.ts   options, connection URLs, the server key of a URL without one
 src/session.ts, client.ts     one connection: heartbeat, reconnect, retries, credentials
 src/subscription.ts           staging at checkpoints, resume, acknowledgement, verify
 src/live.ts, replica.ts       live queries and in-memory copies
