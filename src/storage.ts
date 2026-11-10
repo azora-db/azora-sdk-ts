@@ -1,8 +1,9 @@
 /**
- * File storage over the engine's HTTP API (`/storage/v1`). It needs the
- * `storageUrl` option (or a WebSocket connection, whose host it reuses)
- * and an API key: client tokens cannot call these routes, so browsers
- * upload through signed upload URLs their backend hands out.
+ * File storage over the engine's HTTP API (`/storage/v1`). It uses the
+ * address of an `http(s)` connection URL (or a WebSocket URL's host, or
+ * the `storageUrl` option) and needs an API key: client tokens cannot
+ * call these routes, so browsers upload through signed upload URLs their
+ * backend hands out.
  */
 import { AzoraError, ErrorCode } from './errors.ts'
 
@@ -172,7 +173,9 @@ export class Storage {
 
   private url(path: string, query?: Record<string, string | number | boolean | undefined>): string {
     if (!this.base) {
-      throw new TypeError('azora: file storage needs the storageUrl option (the engine\'s HTTP address, for example https://files.example.com)')
+      throw new TypeError(
+        'azora: file storage needs the engine\'s HTTP address: connect with an http(s) URL (https://db.example.com/<database>), or set the storageUrl option',
+      )
     }
     let u = `${this.base}/storage/v1/${path}`
     if (query) {
