@@ -4,12 +4,10 @@
  *
  *   node --env-file=examples/.env examples/files.ts
  */
-import { connect } from '@azora-db/client'
+import { connectEnv } from '@azora-db/client'
 
-const db = await connect(process.env['AZORA_URL']!, {
-  apiKey: process.env['AZORA_API_KEY']!,
-  storageUrl: process.env['AZORA_STORAGE_URL']!, // the engine's HTTP address
-})
+// AZORA_URL and AZORA_TOKEN. File storage uses the same address: nothing else to configure.
+const db = await connectEnv()
 
 // Upload a file and reference it from a row: the FILE column holds the object's id.
 const invoice = await db.storage.upload('Invoice 2026-0042\nStanding desk frame  129.90\n', {
