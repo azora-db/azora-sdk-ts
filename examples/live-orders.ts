@@ -4,7 +4,7 @@
  *
  *   node --env-file=examples/.env examples/live-orders.ts
  */
-import { connect } from '@azora-db/client'
+import { connectEnv } from '@azora-db/client'
 
 interface Order {
   id: number
@@ -14,9 +14,7 @@ interface Order {
   note: string | null
 }
 
-const url = process.env['AZORA_URL']!
-const apiKey = process.env['AZORA_API_KEY']!
-const db = await connect(url, { apiKey })
+const db = await connectEnv() // AZORA_URL and AZORA_TOKEN
 
 // Rows of `orders` with status = 'open', largest first. `live` resolves once they are loaded.
 const open = await db.live<Order>('orders', { where: "status = 'open'", orderBy: ['total', 'desc'] })
@@ -32,7 +30,7 @@ open.subscribe(({ changes }) => {
 })
 
 // Someone else changes the data: another connection, as another process would.
-const writer = await connect(url, { apiKey })
+const writer = await connectEnv()
 const notes = ['Laptop stand', 'USB-C dock', 'Desk lamp', 'Webcam', 'Keyboard tray']
 for (let i = 0; i < 5; i++) {
   await new Promise((r) => setTimeout(r, 400))
