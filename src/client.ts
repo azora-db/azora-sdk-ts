@@ -9,7 +9,7 @@ import type { Discovery } from './discovery.ts'
 import {
   AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, isPermanent, LostError, TimeoutError, UnknownOutcomeError,
 } from './errors.ts'
-import { MsgType, type ErrorMsg, type Msg, type Result, type Shape, type Signed } from './messages.ts'
+import { MsgType, type ErrorMsg, type Msg, type Result, type Returned, type Shape, type Signed } from './messages.ts'
 import { dial, type Link, type Session } from './session.ts'
 import { Subscription } from './subscription.ts'
 import type { SubscribeSpec, Stats } from './types.ts'
@@ -22,6 +22,9 @@ interface CallPolicy {
   /** An unauthenticated answer is final (Auth itself). */
   noRefresh?: boolean
 }
+
+/** UnitAdmin operations that only read: safe to send again after a lost connection. */
+const UNIT_ADMIN_READS = new Set(['list', 'deploys', 'runs', 'triggers', 'secrets.list'])
 
 interface ShapeInfo {
   columns: readonly string[]
@@ -453,6 +456,29 @@ export class Client {
     const m = await this.call((id) => ({ type: MsgType.Sign, reqId: id, objectId, ttlSeconds }), {}, opts)
     if (m.type !== MsgType.Signed) throw new Error(`azora: unexpected answer type ${m.type}`)
     return m
+  }
+
+  /**
+   * Runs a published unit. argsJSON is the JSON text of its arguments (""
+   * for none). The mutation id is sent again unchanged after a lost
+   * connection, so the call is always safe to retry.
+   */
+  async callUnit(name: string, argsJSON: string, mutationId: string, opts?: CallOptions): Promise<Returned> {
+    const m = await this.call((id) => ({ type: MsgType.Call, reqId: id, unit: name, args: argsJSON, mutationId }), {}, opts)
+    if (m.type !== MsgType.Returned) throw new Error(`azora: unexpected answer type ${m.type}`)
+    return m
+  }
+
+  /**
+   * Sends a UnitAdmin operation and returns the JSON text of its result.
+   * Operations that change state (deploy, activate, call, secrets.set, ...)
+   * are not sent again once written: a lost connection then is an
+   * UnknownOutcomeError. Reads are retried.
+   */
+  async unitAdmin(op: string, body: string, opts?: CallOptions): Promise<string> {
+    const m = await this.call((id) => ({ type: MsgType.UnitAdmin, reqId: id, op, body }), { once: !UNIT_ADMIN_READS.has(op) }, opts)
+    if (m.type !== MsgType.UnitAdminResult) throw new Error(`azora: unexpected answer type ${m.type}`)
+    return m.body
   }
 
   /** Replaces the credential: sent to the server now and used for later connections. */
