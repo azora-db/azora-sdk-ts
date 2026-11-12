@@ -43,8 +43,21 @@ const FOOTER = `globalThis.__azora_units = (function (m) {
 const INDEX = ['index.ts', 'index.mts', 'index.js', 'index.mjs']
 const SOURCE = /\.(m?[jt]s|tsx|jsx)$/
 
-/** This package's library entry: user code's `@azora-db/units` imports resolve to it. */
-const SELF = fileURLToPath(new URL(import.meta.url.endsWith('.ts') ? './index.ts' : './index.js', import.meta.url))
+/**
+ * The file user code's `@azora-db/units` imports resolve to when bundling:
+ * the library's TypeScript source when it is there, else the built
+ * `index.js` next to this module. `../src/index.ts` is the same file
+ * whether this module runs from `src` (scripts, tests) or from `dist` (the
+ * CLI) of a checkout, so both bundle the same library code and make the
+ * same bytes; an installed package ships `dist` only and uses its
+ * `index.js`.
+ */
+export function libraryEntry(moduleUrl: string = import.meta.url, exists: (path: string) => boolean = existsSync): string {
+  const source = fileURLToPath(new URL('../src/index.ts', moduleUrl))
+  return exists(source) ? source : fileURLToPath(new URL('./index.js', moduleUrl))
+}
+
+const SELF = libraryEntry()
 
 /** The entry of a units directory: its index file, or all its source files. */
 export function findEntry(dir: string): { entry: string | null; files: string[] } {
