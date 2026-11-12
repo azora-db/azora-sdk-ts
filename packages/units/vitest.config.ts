@@ -8,6 +8,10 @@ export default defineConfig({
     alias: {
       // The client from source: tests need no build.
       '@azora-db/client': root('src/index.ts'),
+      // This package from source too (fixtures and examples import it by name).
+      '@azora-db/units/testing': root('packages/units/src/testing.ts'),
+      '@azora-db/units/tools': root('packages/units/src/tools.ts'),
+      '@azora-db/units': root('packages/units/src/index.ts'),
       '#tcp': root('src/platform/tcp.node.ts'),
       '#aead': root('src/platform/aead.node.ts'),
     },
