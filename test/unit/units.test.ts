@@ -130,6 +130,12 @@ describe('unit admin', () => {
       activate: { version: 1, units: [] },
       list: { version: 0, units: [] },
       call: { ok: true, value: { blob: { $bytes: 'AQ==' } } },
+      jobs: { jobs: [
+        { id: 'job_a', unit: 'remind', args: { cartId: 'c1', b: { $bytes: 'AQ==' } }, run_at: 9, created_at: 2, created_by: 'user:42', source: 'checkout', attempts: 0, state: 'pending' },
+        { id: 'job_b', unit: 'tick', args: null, run_at: 8, created_at: 1, created_by: 'system', source: 'stats', attempts: 5, state: 'failed', error: 'failed: boom' },
+      ], pending: 1, failed: 1 },
+      'jobs.cancel': { removed: true },
+      'jobs.retry': {},
     }
     const bodies: Array<[string, unknown]> = []
     s.onMessage = (m, c) => {
@@ -163,6 +169,23 @@ describe('unit admin', () => {
     answers['call'] = { ok: false, value: null, error: { code: 'conflict', message: 'taken', data: { id: 1 } } }
     await expect(a.call('audit')).rejects.toMatchObject({ name: 'UnitError', unit: 'audit', code: 'conflict', message: 'taken', data: { id: 1 } })
     expect(bodies.at(-1)).toEqual(['call', { unit: 'audit' }])
+    expect(await a.jobs.list({ state: 'pending', unit: 'remind', limit: 5 })).toEqual({
+      jobs: [
+        { id: 'job_a', unit: 'remind', args: { cartId: 'c1', b: Uint8Array.of(1) }, runAt: 9, createdAt: 2, createdBy: 'user:42', source: 'checkout', attempts: 0, state: 'pending', error: '' },
+        { id: 'job_b', unit: 'tick', args: undefined, runAt: 8, createdAt: 1, createdBy: 'system', source: 'stats', attempts: 5, state: 'failed', error: 'failed: boom' },
+      ],
+      pending: 1,
+      failed: 1,
+    })
+    expect(bodies.at(-1)).toEqual(['jobs', { state: 'pending', unit: 'remind', limit: 5 }])
+    await a.jobs.list()
+    expect(bodies.at(-1)).toEqual(['jobs', {}])
+    expect(await a.jobs.cancel('job_a')).toBe(true)
+    expect(bodies.at(-1)).toEqual(['jobs.cancel', { id: 'job_a' }])
+    await a.jobs.retry('job_b')
+    expect(bodies.at(-1)).toEqual(['jobs.retry', { id: 'job_b' }])
+    await a.runs({ status: 'rejected' })
+    expect(bodies.at(-1)).toEqual(['runs', { status: 'rejected' }])
   })
 
   test('reads are retried after a lost connection; changes are not', async () => {
