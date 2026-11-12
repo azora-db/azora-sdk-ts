@@ -25,8 +25,8 @@ export {
 } from './errors.ts'
 export {
   UnitsAdmin, type DeployInfo, type DeployInput, type DeployResult, type JsonSchema, type UnitArgs, type UnitBrand, type UnitCallOptions,
-  type UnitFunction, type UnitInfo, type UnitKind, type UnitResult, type UnitRun, type Units, type UnitSecret, type UnitsOf, type UnitTrigger,
-  type UntypedUnits,
+  type UnitFunction, type UnitInfo, type UnitJob, type UnitJobList, type UnitKind, type UnitResult, type UnitRun, type UnitRunStatus, type UnitRunTrigger,
+  type Units, type UnitSecret, type UnitsOf, type UnitTrigger, type UntypedUnits,
 } from './units.ts'
 export { CodecError, type InputValue, type Value } from './codec.ts'
 export { newMutationId, type CallOptions } from './util.ts'
