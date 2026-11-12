@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, test } from 'vitest'
 import {
-  action, isUnitDefinition, isUnitName, mutation, onChange, query, schedule, UnitError, v, type MutationCtx, type QueryCtx, type UnitBrand,
+  action, isUnitDefinition, isUnitName, mutation, onChange, query, schedule, UnitError, v, type JobInfo, type MutationCtx, type QueryCtx, type UnitBrand,
 } from '../src/index.ts'
 
 type BrandOf<T> = T extends { readonly '~azora'?: infer B } ? Exclude<B, undefined> : never
@@ -88,5 +88,26 @@ describe('definitions', () => {
         expectTypeOf(gap).toEqualTypeOf<boolean>()
       },
     })
+  })
+})
+
+describe('jobs', () => {
+  test('ctx.scheduler is on mutations and actions, typed by name and arguments when given the module', async () => {
+    const jobs = await import('./fixtures/jobs/index.ts')
+    type Units = typeof jobs
+    type BrandOf<T> = T extends { readonly '~azora'?: infer B } ? Exclude<B, undefined> : never
+    expectTypeOf<BrandOf<Units['placeOrder']>['result']>().toEqualTypeOf<{ cartId: string; reminder: string }>()
+    mutation({
+      handler(ctx) {
+        expectTypeOf(ctx.scheduler.after(1000, 'anything', { any: 'thing' })).toEqualTypeOf<string>()
+        expectTypeOf(ctx.scheduler.at(Date.now(), 'x')).toEqualTypeOf<string>()
+        expectTypeOf(ctx.scheduler.cancel('job_x')).toEqualTypeOf<boolean>()
+        expectTypeOf(ctx.unit.job).toEqualTypeOf<JobInfo | null>()
+        expectTypeOf(ctx.unit.trigger).toEqualTypeOf<'call' | 'schedule' | 'change' | 'job' | 'admin' | 'cli' | 'mcp'>()
+      },
+    })
+    action({ handler: (ctx) => void ctx.scheduler.after(0, 'x') })
+    // @ts-expect-error queries cannot schedule
+    query({ handler: (ctx) => ctx.scheduler.after(0, 'x') })
   })
 })
