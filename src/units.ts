@@ -189,6 +189,42 @@ export interface DeployInfo {
   active: boolean
 }
 
+/** What started a unit run. */
+export type UnitRunTrigger = 'call' | 'schedule' | 'change' | 'job' | 'admin' | 'cli' | 'mcp' | (string & {})
+
+/** How a unit run ended. */
+export type UnitRunStatus = 'ok' | 'error' | 'replayed' | 'rejected' | (string & {})
+
+/** A job scheduled with `ctx.scheduler` (times are unix milliseconds). */
+export interface UnitJob {
+  /** `job_` and 26 characters. */
+  id: string
+  unit: string
+  /** The job's arguments (blobs as Uint8Array), undefined for none. */
+  args: unknown
+  /** pending: when it is due; failed: when it failed for good. */
+  runAt: number
+  createdAt: number
+  /** The principal of the run that scheduled it. */
+  createdBy: string
+  /** The unit that scheduled it. */
+  source: string
+  /** Failed runs so far. */
+  attempts: number
+  state: 'pending' | 'failed'
+  /** The last failure ("" for none). */
+  error: string
+}
+
+/** A page of jobs and the database's counts. */
+export interface UnitJobList {
+  jobs: UnitJob[]
+  /** Jobs waiting in the database (all units). */
+  pending: number
+  /** Jobs that failed for good. */
+  failed: number
+}
+
 /** A unit run in the run log. */
 export interface UnitRun {
   /** The run's id (`runs({ before, after })` pages by it). */
@@ -196,10 +232,22 @@ export interface UnitRun {
   at: number
   unit: string
   kind: UnitKind
-  trigger: 'call' | 'schedule' | 'change' | 'admin' | (string & {})
+  /**
+   * What started the run: `call` (a client), `schedule`, `change`
+   * (onChange), `job` (`ctx.scheduler`), `admin` (the admin API, the
+   * dashboard), `cli` (`azora-units call`, {@link UnitsAdmin.call}) or
+   * `mcp` (an AI agent).
+   */
+  trigger: UnitRunTrigger
   principal: string
   durationMs: number
-  status: 'ok' | 'error' | 'replayed' | (string & {})
+  /**
+   * `ok`; `error` (the unit ran and threw, timed out or hit a limit);
+   * `replayed` (a retry answered from the stored result); `rejected`
+   * (refused before the unit ran: arguments that do not match its schema,
+   * an internal unit called by a client).
+   */
+  status: UnitRunStatus
   error: string
   /** What the run logged (`ctx.log`), one line per entry. */
   logs: string
@@ -255,9 +303,38 @@ export class UnitsAdmin {
     unset(name: string, opts?: CallOptions): Promise<boolean>
   }
 
+  /** Jobs units scheduled with `ctx.scheduler`: waiting and failed ones. */
+  readonly jobs: {
+    /** Waiting jobs first (the next due first), then failed ones; at most `limit` (default 100). */
+    list(o?: { state?: 'pending' | 'failed'; unit?: string; limit?: number }, opts?: CallOptions): Promise<UnitJobList>
+    /** Removes a job, waiting or failed; reports whether it existed. A running job finishes. */
+    cancel(id: string, opts?: CallOptions): Promise<boolean>
+    /** Runs a failed job again now, its attempts reset (`invalid` for a job that is not failed, `not_found` for none). */
+    retry(id: string, opts?: CallOptions): Promise<void>
+  }
+
   /** @internal */
   constructor(send: AdminSend) {
     this.send = send
+    this.jobs = {
+      list: async (o = {}, opts) => {
+        const r = await this.op<{ jobs?: unknown[]; pending?: number; failed?: number }>('jobs', o, opts)
+        return {
+          jobs: (r.jobs ?? []).map((x) => {
+            const j = camel<UnitJob & { args: unknown; error?: string }>(x)
+            j.args = j.args === null ? undefined : reviveBytes(j.args)
+            j.error ??= ''
+            return j
+          }),
+          pending: r.pending ?? 0,
+          failed: r.failed ?? 0,
+        }
+      },
+      cancel: async (id, opts) => Boolean((await this.op<{ removed?: unknown }>('jobs.cancel', { id }, opts)).removed),
+      retry: async (id, opts) => {
+        await this.op('jobs.retry', { id }, opts)
+      },
+    }
     this.secrets = {
       list: async (opts) => ((await this.op<{ secrets?: unknown[] }>('secrets.list', {}, opts)).secrets ?? []).map((s) => camel<UnitSecret>(s)),
       set: async (name, value, opts) => {
@@ -327,7 +404,7 @@ export class UnitsAdmin {
    * status, older than run id `before` or newer than run id `after`.
    */
   async runs(
-    o: { limit?: number; unit?: string; status?: 'ok' | 'error' | 'replayed'; before?: number; after?: number } = {},
+    o: { limit?: number; unit?: string; status?: 'ok' | 'error' | 'replayed' | 'rejected'; before?: number; after?: number } = {},
     opts?: CallOptions,
   ): Promise<UnitRun[]> {
     const r = await this.op<{ runs?: unknown[] }>('runs', o, opts)
