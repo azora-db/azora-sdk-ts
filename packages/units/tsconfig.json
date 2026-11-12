@@ -5,6 +5,7 @@
     "paths": {
       "@azora-db/client": ["../../src/index.ts"],
       "@azora-db/units": ["./src/index.ts"],
+      "@azora-db/units/testing": ["./src/testing.ts"],
       "#tcp": ["../../src/platform/tcp.node.ts"],
       "#aead": ["../../src/platform/aead.node.ts"]
     }
