@@ -383,18 +383,51 @@ are not `internal` appear on `db.units`. Without the type argument
   document; when it does not list `"units"`, `db.call` rejects at once
   with `unavailable: this server does not support units`.
 
+**Jobs.** In a mutation or an action, `ctx.scheduler.after(ms, unit,
+args)` and `ctx.scheduler.at(dateOrUnixMs, unit, args)` run a mutation or
+action later, once, and return the job's id; `ctx.scheduler.cancel(id)`
+removes a waiting one. In a mutation the job is part of its transaction:
+a mutation that throws schedules nothing. Jobs run as the system
+(`job:<id>`, `ctx.unit.job` set), are retried with backoff when they
+throw, and are kept as failed after the last attempt
+([`@azora-db/units`](packages/units/README.md#jobs)).
+
 **Operating** (an API key with the `ddl` scope): `db.unitsAdmin` has
 `deploy`, `list`, `deploys`, `activate` (rollback), `call` (runs any unit
-as the caller, internal ones too), `runs` (the run log), `triggers`,
-`skipTrigger` and `secrets.list/set/unset`. Operations that change
-something are not sent again after a lost connection (the call rejects
-with `UnknownOutcomeError`); reads are. Most of the time the
-`azora-units` CLI does this for you: `publish`, `dev`, `list`, `history`,
-`rollback`, `call`, `logs --follow`, `secrets`, `types --go`.
+as the caller, internal ones too), `runs` (the run log, filtered by unit
+and status: `ok`, `error`, `replayed` or `rejected`), `triggers`,
+`skipTrigger`, `secrets.list/set/unset` and `jobs.list/cancel/retry`.
+A run's `trigger` is `call`, `schedule`, `change`, `job`, `admin`, `cli`
+(`unitsAdmin.call`, `azora-units call`) or `mcp`; `rejected` runs were
+refused before the unit ran (arguments that do not match, an internal
+unit called by a client). Operations that change something are not sent
+again after a lost connection (the call rejects with
+`UnknownOutcomeError`); reads are. Most of the time the `azora-units`
+CLI does this for you: `publish`, `dev`, `list`, `history`, `rollback`,
+`call`, `logs --follow [--status rejected]`, `jobs`, `secrets`,
+`types --go`.
+
+**Testing without an engine.** `@azora-db/units/testing` runs your units
+in Node against an in-memory SQLite database (Node.js 22.13+), with the
+engine's transactions, argument checks, SQL rules, values, jobs on a fake
+clock and run log; calls answer like `db.call`, errors included
+([what differs](packages/units/README.md#testing-units-locally)):
+
+```ts
+import * as units from './units/index.ts'
+import { createTestEnv } from '@azora-db/units/testing'
+
+const t = createTestEnv(units, { schema: ['CREATE TABLE carts(...)'], auth: { subject: 'user:42' } })
+const { orderId } = await t.call('checkout', { cartId: 'c1' })
+t.db.all('SELECT * FROM orders')
+await t.advance(24 * 3600e3)   // runs the jobs that fall due
+```
 
 [`examples/units`](examples/units) is a complete shop: a customer token
 that cannot run SQL checks out its own cart through a unit, an internal
-unit called with `ctx.run`, an `onChange` unit and a `schedule`.
+unit called with `ctx.run`, an `onChange` unit, a `schedule`, and a
+reminder job (`remindCart`). `shop.test.ts` tests it locally
+(`pnpm test` in `examples/units`).
 
 ## React
 
@@ -548,7 +581,7 @@ connects with those two values (`connectEnv()`).
 | [`files.ts`](examples/files.ts) | uploads, signed URLs, resumable upload, ranges, through the same URL |
 | [`tokens.ts`](examples/tokens.ts) | the same URL with a client token pinned to one customer's rows |
 | [`watch.ts`](examples/watch.ts) | an aggregate kept fresh with `watch` |
-| [`units/`](examples/units) | units: publish a shop's units, call them with the API key and with a customer token that cannot run SQL (`node --env-file=examples/.env examples/units/shop.ts`) |
+| [`units/`](examples/units) | units: publish a shop's units, call them with the API key and with a customer token that cannot run SQL, schedule jobs (`node --env-file=examples/.env examples/units/shop.ts`); test them without an engine (`cd examples/units && pnpm test`) |
 | [`web/`](examples/web) | a React orders board in the browser: `cd examples/web && pnpm install && pnpm dev` |
 
 The dev engine needs the engine binary: set `AZORA_BIN`, or build
