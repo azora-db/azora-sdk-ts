@@ -171,6 +171,77 @@ describe('azora-units', () => {
     expect(out.lines).toEqual(['There was no secret A.'])
   })
 
+  test('logs shows rejected calls apart from errors, with the trigger, and filters by status', async () => {
+    const at = Date.UTC(2026, 10, 10, 12, 0, 0)
+    const s = server(() => ({ runs: [
+      { id: 3, at: at + 2000, unit: 'remind', kind: 'mutation', trigger: 'job', principal: 'job:job_abc', duration_ms: 1, status: 'ok', error: '', logs: '' },
+      { id: 2, at: at + 1000, unit: 'audit', kind: 'mutation', trigger: 'call', principal: 'user:42', duration_ms: 0, status: 'rejected', error: 'unit "audit" is internal: only other units can run it', logs: '' },
+      { id: 1, at, unit: 'checkout', kind: 'mutation', trigger: 'cli', principal: 'key:app', duration_ms: 2, status: 'error', error: 'failed: boom', logs: '' },
+    ] }))
+    const c = async (): Promise<Conn> => s.conn
+    let out = io()
+    expect(await main(['logs'], out, c)).toBe(0)
+    expect(out.lines).toEqual([
+      '2026-11-10 12:00:00  error     checkout  cli  key:app  2 ms',
+      '    error: failed: boom',
+      '2026-11-10 12:00:01  rejected  audit  call  user:42  0 ms',
+      '    rejected: unit "audit" is internal: only other units can run it',
+      '2026-11-10 12:00:02  ok        remind  job  job:job_abc  1 ms',
+    ])
+    out = io()
+    await main(['logs', '--status', 'rejected'], out, c)
+    expect(s.ops.at(-1)).toEqual(['runs', { limit: 20, status: 'rejected' }])
+    out = io()
+    expect(await main(['logs', '--status', 'bad'], out, c)).toBe(2)
+    expect(out.errors[0]).toMatch(/--status must be one of ok, error, replayed, rejected/)
+  })
+
+  test('jobs lists, cancels and retries jobs', async () => {
+    const at = Date.UTC(2026, 10, 10, 12, 0, 0)
+    const s = server((op) => {
+      if (op === 'jobs') {
+        return { jobs: [
+          { id: 'job_aaaaaaaaaaaaaaaaaaaaaaaaaa', unit: 'remind', args: { cartId: 'c1' }, run_at: at + 3600e3, created_at: at, created_by: 'user:42', source: 'checkout', attempts: 0, state: 'pending' },
+          { id: 'job_bbbbbbbbbbbbbbbbbbbbbbbbbb', unit: 'sync', args: null, run_at: at + 60e3, created_at: at, created_by: 'system', source: 'nightly', attempts: 5, state: 'failed', error: 'failed: webhook answered 500\n  at handler (index.ts:3:9)' },
+        ], pending: 1, failed: 1 }
+      }
+      if (op === 'jobs.cancel') return { removed: false }
+      if (op === 'jobs.retry') return {}
+      return {}
+    })
+    const c = async (): Promise<Conn> => s.conn
+    let out = io()
+    expect(await main(['jobs'], out, c)).toBe(0)
+    expect(s.ops.at(-1)).toEqual(['jobs', { limit: 100 }])
+    expect(out.lines).toEqual([
+      '1 waiting, 1 failed:',
+      '  ID                              UNIT    STATE    WHEN                        ATTEMPTS  FROM                ARGS',
+      '  job_aaaaaaaaaaaaaaaaaaaaaaaaaa  remind  pending  due 2026-11-10 13:00:00     0         checkout (user:42)  {"cartId":"c1"}',
+      '  job_bbbbbbbbbbbbbbbbbbbbbbbbbb  sync    failed   failed 2026-11-10 12:01:00  5         nightly (system)',
+      '      error: failed: webhook answered 500',
+    ])
+    out = io()
+    await main(['jobs', '--state', 'failed', '--unit', 'sync', '--limit', '5', '--json'], out, c)
+    expect(s.ops.at(-1)).toEqual(['jobs', { limit: 5, state: 'failed', unit: 'sync' }])
+    expect(JSON.parse(out.lines.join('\n'))).toMatchObject({ pending: 1, failed: 1, jobs: [{ runAt: at + 3600e3, args: { cartId: 'c1' } }, { state: 'failed' }] })
+    out = io()
+    expect(await main(['jobs', '--state', 'done'], out, c)).toBe(2)
+    out = io()
+    await main(['jobs', 'cancel', 'job_x'], out, c)
+    expect(s.ops.at(-1)).toEqual(['jobs.cancel', { id: 'job_x' }])
+    expect(out.lines).toEqual(['There was no job job_x.'])
+    out = io()
+    await main(['jobs', 'retry', 'job_y'], out, c)
+    expect(s.ops.at(-1)).toEqual(['jobs.retry', { id: 'job_y' }])
+    expect(out.lines).toEqual(['job_y runs again now.'])
+    out = io()
+    expect(await main(['jobs', 'retry'], out, c)).toBe(2)
+    const none = server(() => ({ jobs: [], pending: 0, failed: 0 }))
+    out = io()
+    await main(['jobs'], out, async () => none.conn)
+    expect(out.lines).toEqual(['No jobs.'])
+  })
+
   test('types --go writes Go from the local units', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'azora-units-types-'))
     const out = io()
