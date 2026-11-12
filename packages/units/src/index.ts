@@ -23,6 +23,6 @@ export {
 export { UnitError, type UnitErrorCode } from './error.ts'
 export { argsSchema, isValidator, v, type ArgsSpec, type Described, type Infer, type InferArgs, type InferShape, type JsonSchema, type Shape, type Validator } from './v.ts'
 export type {
-  ActionCtx, Auth, BaseCtx, BatchStatement, Change, ChangeBatch, Crypto, Ctx, Db, DbReader, ExecResult, FetchInit, FetchResponse, Log, MutationCtx,
-  QueryCtx, Row, SqlArg, SqlValue, UnitInfo, UnitKind,
+  ActionCtx, Auth, BaseCtx, BatchStatement, Change, ChangeBatch, Crypto, Ctx, Db, DbReader, ExecResult, FetchHeaders, FetchInit, FetchResponse, JobInfo, Log,
+  MutationCtx, QueryCtx, Row, Scheduler, SqlArg, SqlValue, UnitInfo, UnitKind, UnitTrigger,
 } from './ctx.ts'
