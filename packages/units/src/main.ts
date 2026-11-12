@@ -8,7 +8,9 @@ import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatch
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
-import { AzoraError, ConnectionError, connect, ErrorCode, TimeoutError, UnitError, type UnitInfo, type UnitRun, type UnitsAdmin } from '@azora-db/client'
+import {
+  AzoraError, ConnectionError, connect, ErrorCode, TimeoutError, UnitError, type UnitInfo, type UnitJob, type UnitJobList, type UnitRun, type UnitsAdmin,
+} from '@azora-db/client'
 import { BundleError, bundleUnits, evaluateBundle, findEntry, manifestOf, type Bundle } from './bundle.ts'
 import { EnvError, loadEnv } from './env.ts'
 import { generateGo, goPackage } from './gogen.ts'
@@ -28,8 +30,13 @@ Commands:
   history [--limit n]         the deploy history
   rollback <version>          make an earlier deploy active again
   call <unit> [json]          call a unit (internal ones too) and print its result
-  logs [--follow] [--unit name] [--limit n]
-                              the run log, oldest first; --follow keeps printing new runs
+  logs [--follow] [--unit name] [--status s] [--limit n]
+                              the run log, oldest first; --follow keeps printing new runs;
+                              --status is ok, error, replayed or rejected
+  jobs [--state pending|failed] [--unit name] [--limit n]
+                              jobs scheduled with ctx.scheduler: waiting, then failed
+  jobs cancel <id>            remove a job (waiting or failed)
+  jobs retry <id>             run a failed job again now
   secrets list                secret names (values are never shown)
   secrets set <name> [value]  set a secret; without a value it is read from stdin
   secrets unset <name>
@@ -153,8 +160,33 @@ function logLines(logs: unknown): string[] {
 
 function runLines(r: UnitRun): string[] {
   const out = [`${time(r.at)}  ${String(r.status).padEnd(8)}  ${r.unit}  ${r.trigger}  ${r.principal}  ${ms(r.durationMs)}`]
-  if (r.error) out.push(`    error: ${r.error}`)
+  // A rejected call never ran: the caller's mistake, not the unit's.
+  if (r.error) out.push(`    ${r.status === 'rejected' ? 'rejected' : 'error'}: ${r.error}`)
   for (const l of logLines(r.logs)) out.push(`    ${l}`)
+  return out
+}
+
+function clip(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, n - 1) + '…'
+}
+
+function jobLines(r: UnitJobList): string[] {
+  const head = `${r.pending} waiting, ${r.failed} failed${r.jobs.length < r.pending + r.failed ? ` (${r.jobs.length} shown)` : ''}`
+  if (r.jobs.length === 0) return [r.pending + r.failed === 0 ? 'No jobs.' : `${head}; none match.`]
+  const rows = [['  ID', 'UNIT', 'STATE', 'WHEN', 'ATTEMPTS', 'FROM', 'ARGS']]
+  const errors = new Map<number, string>()
+  r.jobs.forEach((j: UnitJob, i) => {
+    // A waiting job's time is when it is due, a failed job's when it failed.
+    const when = `${j.state === 'failed' ? 'failed' : 'due'} ${time(j.runAt)}`
+    rows.push([`  ${j.id}`, j.unit, j.state, when, String(j.attempts), `${j.source} (${j.createdBy})`, j.args === undefined ? '' : clip(json(j.args, 0), 40)])
+    if (j.error) errors.set(i + 1, j.error)
+  })
+  const out = [`${head}:`]
+  table(rows).forEach((l, i) => {
+    out.push(l)
+    const e = errors.get(i)
+    if (e) out.push(`      error: ${e.split('\n')[0]}`)
+  })
   return out
 }
 
@@ -184,6 +216,8 @@ interface Flags {
   note?: string
   follow: boolean
   unit?: string
+  status?: string
+  state?: string
   limit?: string
   go?: string
   package?: string
@@ -299,7 +333,10 @@ async function withDb<T>(f: Flags, connector: Connector, run: (a: UnitsAdmin) =>
 async function logs(f: Flags, io: IO, connector: Connector): Promise<void> {
   const limit = int(f.limit, '--limit', 20)
   const interval = int(f.interval, '--interval', 1000)
-  const q = { limit, ...(f.unit !== undefined && { unit: f.unit }) }
+  const statuses = ['ok', 'error', 'replayed', 'rejected'] as const
+  const status = f.status as (typeof statuses)[number] | undefined
+  if (status !== undefined && !statuses.includes(status)) throw new UsageError(`--status must be one of ${statuses.join(', ')}, not ${JSON.stringify(f.status)}`)
+  const q = { limit, ...(f.unit !== undefined && { unit: f.unit }), ...(status !== undefined && { status }) }
   await withDb(f, connector, async (a) => {
     let last = 0 // the newest run id printed
     const print = (runs: UnitRun[]): void => {
@@ -377,6 +414,8 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
         note: { type: 'string' },
         follow: { type: 'boolean', short: 'f', default: false },
         unit: { type: 'string' },
+        status: { type: 'string' },
+        state: { type: 'string' },
         limit: { type: 'string' },
         interval: { type: 'string' },
         go: { type: 'string' },
@@ -489,6 +528,28 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
           io.out(f.json ? json({ name, removed }) : removed ? `Removed ${name}.` : `There was no secret ${name}.`)
         } else {
           throw new UsageError('usage: azora-units secrets list | set <name> [value] | unset <name>')
+        }
+        break
+      }
+      case 'jobs': {
+        const [sub, id] = pos
+        if (sub === undefined || sub === 'list') {
+          const state = f.state as 'pending' | 'failed' | undefined
+          if (state !== undefined && state !== 'pending' && state !== 'failed') throw new UsageError(`--state must be pending or failed, not ${JSON.stringify(f.state)}`)
+          const o = { limit: int(f.limit, '--limit', 100), ...(state !== undefined && { state }), ...(f.unit !== undefined && { unit: f.unit }) }
+          const r = await withDb(f, connector, (a) => a.jobs.list(o))
+          if (f.json) io.out(json(r))
+          else for (const l of jobLines(r)) io.out(l)
+        } else if (sub === 'cancel') {
+          need(2, 'jobs cancel <id>')
+          const removed = await withDb(f, connector, (a) => a.jobs.cancel(id as string))
+          io.out(f.json ? json({ id, removed }) : removed ? `Removed ${id}.` : `There was no job ${id}.`)
+        } else if (sub === 'retry') {
+          need(2, 'jobs retry <id>')
+          await withDb(f, connector, (a) => a.jobs.retry(id as string))
+          io.out(f.json ? json({ id }) : `${id} runs again now.`)
+        } else {
+          throw new UsageError('usage: azora-units jobs [--state pending|failed] [--unit name] [--limit n] | cancel <id> | retry <id>')
         }
         break
       }
