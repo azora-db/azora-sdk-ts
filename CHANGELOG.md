@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Units: jobs, run statuses, local tests
+
+- `db.unitsAdmin.jobs.list({ state, unit, limit })`, `jobs.cancel(id)`
+  and `jobs.retry(id)`: the jobs units schedule with `ctx.scheduler`
+  (`UnitJob`, `UnitJobList`). A failed job's `runAt` is when it failed.
+  Listing is a read (sent again after a lost connection); cancel and
+  retry are not.
+- `UnitRun.status` adds `rejected` (refused before the unit ran) and
+  `runs({ status: 'rejected' })` filters on it; `UnitRun.trigger` adds
+  `job`, `cli` and `mcp` (`UnitRunStatus`, `UnitRunTrigger`).
+- `@azora-db/units`: `ctx.scheduler` and `ctx.unit.job`, the
+  `azora-units jobs` command, `rejected` runs in `logs`, and
+  `@azora-db/units/testing` to run units locally without an engine (see
+  `packages/units/CHANGELOG.md`).
+- `examples/units` has a reminder job (`remindCart`, `cartReminder`),
+  shown by `shop.ts`, and `shop.test.ts`, which tests the shop's units
+  locally (`pnpm test` there).
+- `pnpm dev:engine` no longer publishes the example units a second time
+  when `azora-units publish` runs afterwards: the bundle is the same
+  whether the bundler runs from source or from `dist`.
+
 ### Units
 
 - Units: TypeScript functions published into a database and called by
