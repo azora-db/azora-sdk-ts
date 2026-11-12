@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "publish:units": "azora-units publish --env-file ../.env",
-    "start": "node --env-file=../.env shop.ts"
+    "start": "node --env-file=../.env shop.ts",
+    "test": "node --test shop.test.ts"
   },
   "dependencies": {
     "@azora-db/client": "workspace:*",
