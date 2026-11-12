@@ -53,6 +53,34 @@ export const checkout = mutation({
   },
 })
 
+/**
+ * Reminds the customer of a cart in `minutes` (default: a day), unless it
+ * is checked out by then: a job (ctx.scheduler) runs cartReminder once,
+ * later. The job is written in this mutation's transaction.
+ */
+export const remindCart = mutation({
+  description: 'Schedules a reminder for a cart in `minutes` (default: a day).',
+  args: { cartId: v.string({ min: 1, max: 64 }), minutes: v.optional(v.number({ min: 0, max: 7 * 24 * 60 })) },
+  handler(ctx, { cartId, minutes }) {
+    const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
+    if (!cart) throw new UnitError('not_found', 'no such cart', { cartId })
+    if (ctx.auth.kind === 'token' && cart.customer !== customerOf(ctx)) throw new UnitError('permission_denied', 'this cart is not yours')
+    const jobId: string = ctx.scheduler.after((minutes ?? 24 * 60) * 60_000, 'cartReminder', { cartId })
+    return { jobId }
+  },
+})
+
+/** The reminder job: an audit line for a cart still waiting (a real shop would email from an action). */
+export const cartReminder = mutation({
+  internal: true,
+  args: { cartId: v.string() },
+  handler(ctx, { cartId }) {
+    const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
+    if (!cart) return // checked out meanwhile: nothing to do (throwing would retry the job)
+    ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', ctx.now(), 'reminder', `cart ${cartId} of customer ${cart.customer} is waiting (${ctx.unit.job?.id})`)
+  },
+})
+
 /** Writes an audit line. Internal: clients cannot call it, other units can (ctx.run). */
 export const audit = mutation({
   internal: true,
