@@ -24,7 +24,7 @@ interface CallPolicy {
 }
 
 /** UnitAdmin operations that only read: safe to send again after a lost connection. */
-const UNIT_ADMIN_READS = new Set(['list', 'deploys', 'runs', 'triggers', 'secrets.list'])
+const UNIT_ADMIN_READS = new Set(['list', 'deploys', 'runs', 'triggers', 'secrets.list', 'jobs'])
 
 interface ShapeInfo {
   columns: readonly string[]
