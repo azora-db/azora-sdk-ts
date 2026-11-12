@@ -1,8 +1,11 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
+import { build } from 'esbuild'
 import { describe, expect, test } from 'vitest'
+import { libraryEntry } from '../src/bundle.ts'
 import { BundleError, bundleUnits, evaluateBundle, manifestOf } from '../src/tools.ts'
 
 const fixture = (name: string): string => new URL(`./fixtures/${name}`, import.meta.url).pathname
@@ -71,6 +74,33 @@ describe('bundle', () => {
     } finally {
       process.chdir(cwd)
     }
+  })
+
+  test('the bundler run from src and from dist makes the same bundle', async () => {
+    // What `pnpm build` makes of bundle.ts, in a directory next to src as
+    // dist is (a fresh copy: the real dist may be stale while developing).
+    const pkg = fileURLToPath(new URL('..', import.meta.url))
+    const out = mkdtempSync(join(pkg, '.dist-test-'))
+    try {
+      await build({ entryPoints: [join(pkg, 'src/bundle.ts')], outfile: join(out, 'bundle.js'), format: 'esm', platform: 'node', logLevel: 'silent' })
+      const fromDist = (await import(pathToFileURL(join(out, 'bundle.js')).href)) as typeof import('../src/bundle.ts')
+      for (const dir of [fixture('shop'), fileURLToPath(new URL('../../../examples/units/units', import.meta.url))]) {
+        const a = await bundleUnits(dir)
+        const b = await fromDist.bundleUnits(dir)
+        expect(b.bundle).toBe(a.bundle)
+        expect(b.sourceMap).toBe(a.sourceMap)
+      }
+    } finally {
+      rmSync(out, { recursive: true, force: true })
+    }
+  })
+
+  test('user code imports the library source in a checkout, the built index.js in an installed package', () => {
+    const src = fileURLToPath(new URL('../src/index.ts', import.meta.url))
+    expect(libraryEntry(new URL('../src/bundle.ts', import.meta.url).href)).toBe(src)
+    expect(libraryEntry(new URL('../dist/bundle.js', import.meta.url).href)).toBe(src)
+    const installed = 'file:///app/node_modules/@azora-db/units/dist/bundle.js'
+    expect(libraryEntry(installed, () => false)).toBe('/app/node_modules/@azora-db/units/dist/index.js')
   })
 
   test('the source map points at the TypeScript sources', async () => {
