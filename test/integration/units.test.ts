@@ -71,7 +71,7 @@ describe.skipIf(!engineBinary())('units', () => {
     expect(first).toMatchObject({ unchanged: false, dryRun: false })
     expect(first.version).toBeGreaterThan(0)
     const names = first.units.map((u) => u.name).sort()
-    expect(names).toEqual(['audit', 'bump', 'boom', 'checkout', 'echo', 'hasSecret', 'myOrders', 'orderPlaced', 'refuse', 'stats', 'whoami'].sort())
+    expect(names).toEqual(['audit', 'bump', 'boom', 'cartReminder', 'checkout', 'echo', 'hasSecret', 'myOrders', 'orderPlaced', 'refuse', 'remindCart', 'stats', 'whoami'].sort())
     expect(first.units.find((u) => u.name === 'checkout')).toMatchObject({
       kind: 'mutation', internal: false, args: { type: 'object', properties: { cartId: { type: 'string', minLength: 1, maxLength: 64 } }, required: ['cartId'] },
     })
