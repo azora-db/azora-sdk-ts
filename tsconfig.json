@@ -23,7 +23,8 @@
       "#aead": ["./src/platform/aead.node.ts"],
       "@azora-db/client": ["./src/index.ts"],
       "@azora-db/units": ["./packages/units/src/index.ts"],
-      "@azora-db/units/tools": ["./packages/units/src/tools.ts"]
+      "@azora-db/units/tools": ["./packages/units/src/tools.ts"],
+      "@azora-db/units/testing": ["./packages/units/src/testing.ts"]
     }
   },
   "include": ["src", "test", "bench", "scripts", "examples/*.ts", "examples/units/*.ts", "examples/units/units/**/*.ts", "vitest.config.ts"]
