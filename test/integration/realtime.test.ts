@@ -200,6 +200,26 @@ describe.skipIf(!engineBinary())('subscriptions and live queries', () => {
     await stop()
   })
 
+  test('live query with verifyEvery checks itself against the server', async () => {
+    const results: VerifyResult[] = []
+    const live = await db.live<Order>('orders', { where: eq('customer', 1), verifyEvery: 25, onVerify: (r) => results.push(r) })
+    await until(() => results.length >= 1, 'the first periodic check')
+    expect(results[0]).toMatchObject({ match: true, serverRows: live.size, localRows: live.size })
+    // Checks keep passing while the rows change.
+    const before = results.length
+    for (let i = 0; i < 5; i++) await insert(1, 'open', 7000 + i)
+    await until(() => live.rows.some((o) => o.total === 7004), 'the inserts')
+    const rows = live.size
+    await until(() => results.length > before && results[results.length - 1]?.localRows === rows, 'a check after the inserts')
+    expect(results.every((r) => r.match)).toBe(true)
+    expect(live.lastVerify).toBe(results[results.length - 1])
+    expect(live.mismatches).toBe(0)
+    await live.close()
+    const after = results.length
+    await new Promise((r) => setTimeout(r, 100))
+    expect(results.length).toBe(after) // no check after close
+  })
+
   test('resync takes a new snapshot', async () => {
     const live = await db.live<Order>('orders', { where: eq('customer', 1) })
     const resets: boolean[] = []
