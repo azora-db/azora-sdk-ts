@@ -147,6 +147,10 @@ export interface ManifestUnit {
   name: string
   kind: string
   internal: boolean
+  /** The scope a credential needs to call it (query, mutation and action units). */
+  access?: string
+  /** How it answers plain HTTP: "auth" or "public" (absent: it does not). */
+  http?: string
   description: string
   args: Record<string, unknown> | null
   mode?: string
@@ -181,6 +185,9 @@ export function manifestOf(units: Record<string, Record<string, unknown>>): Mani
       args: d['args'] == null ? null : (JSON.parse(JSON.stringify(d['args'])) as Record<string, unknown>),
     }
     if (d['kind'] === 'schedule' || d['kind'] === 'onChange') u.mode = String(d['mode'])
+    else u.access = d['access'] ? String(d['access']) : d['kind'] === 'query' ? 'read' : 'write'
+    if (d['http'] === true) u.http = 'auth'
+    else if (d['http'] === 'public') u.http = 'public'
     if (d['kind'] === 'schedule') Object.assign(u, { cron: String(d['cron'] ?? ''), every: String(d['every'] ?? '') })
     if (d['kind'] === 'onChange') Object.assign(u, { table: String(d['table']), ops: [...(d['ops'] as string[])], batch: Number(d['batch']) })
     return u
