@@ -31,6 +31,20 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
     expect(row).toEqual({ i: 42, neg: -7, big, f: 2.5, s: 'héllo 🌍', b: blob, n: null, t: 1, empty: new Uint8Array(0), min: -(2n ** 63n) })
   })
 
+  // The engine used to convert by declared type, sending a time value this
+  // codec does not know (the query then never answered) and booleans.
+  test('a value comes back as stored, whatever type the column declares', async () => {
+    await db.exec('CREATE TABLE stored_ev(id INTEGER PRIMARY KEY, ts DATETIME, d DATE, at TIMESTAMP, ok BOOLEAN)')
+    await db.exec("INSERT INTO stored_ev VALUES (1, 5, 'not a date', '2026-01-02 03:04:05', 1), (2, 1.5, NULL, 1700000000000, 0)")
+    const want = [
+      { id: 1, ts: 5, d: 'not a date', at: '2026-01-02 03:04:05', ok: 1 },
+      { id: 2, ts: 1.5, d: null, at: 1700000000000, ok: 0 },
+    ]
+    expect(await db.query('SELECT * FROM stored_ev ORDER BY id')).toEqual(want)
+    expect(await db.tx((tx) => tx.query('SELECT * FROM stored_ev ORDER BY id'))).toEqual(want)
+    await db.exec('DROP TABLE stored_ev')
+  })
+
   test('exec, queryValue, sql tag and batch', async () => {
     const r = await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [1, 'open', 10.5])
     expect(r).toMatchObject({ rowsAffected: 1, replayed: false })
