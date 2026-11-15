@@ -2,7 +2,7 @@
 
 `@azora-db/client` connects JavaScript and TypeScript programs to an
 [Azora DB](../azora-engine) database: SQL, writes that apply exactly once,
-live queries, change notifications, file storage and
+transactions, live queries, change notifications, file storage and
 [units](#units) (your own TypeScript functions, published into the
 database and called like an API), over one connection that is encrypted
 end to end and kept alive for you.
@@ -25,7 +25,7 @@ live.subscribe(() => render(live.rows)) // every change, as it commits
 
 - [Install](#install)
 - [Connecting](#connecting)
-- [Reading](#reading) · [Writing](#writing)
+- [Reading](#reading) · [Writing](#writing) · [Transactions](#transactions) · [Row types from the schema](#row-types-from-the-schema)
 - [Live queries](#live-queries) · [Subscriptions](#subscriptions) · [Watching tables](#watching-tables)
 - [Units](#units)
 - [React](#react)
@@ -108,7 +108,10 @@ servers, or a client token your backend mints for one user, optionally
 limited to tables and pinned to filters (`azora realtime token create shop
 --sub user:42 --table orders --filter "orders: customer = 42"`). Both go
 in the `token` option (`apiKey` is another name for it), with the same
-URL:
+URL. When users sign in with an identity provider (Auth0, Clerk,
+Keycloak) and the database accepts it (`azora meta issuer add`), the
+provider's JWT is the token: pass a function that returns the current
+one, and no backend of yours has to mint anything.
 
 ```ts
 // A browser or an app: the public URL, and a short-lived token from your backend.
@@ -182,7 +185,10 @@ Values map to SQLite's types:
 | `Date` | TEXT, ISO 8601 (`2026-01-02T03:04:05.000Z`) |
 
 Coming back, integers are `number` while that is exact and `bigint` beyond
-2^53; blobs are `Uint8Array`.
+2^53; blobs are `Uint8Array`. A value comes back as SQLite stores it,
+whatever type the column declares: a `BOOLEAN` column holds 1 or 0, and a
+`DATE` or `DATETIME` column the text or number that was written. Queries
+and live rows agree on this.
 
 A read returns at most 10,000 rows (`truncated` tells when rows were cut;
 page with `LIMIT`/`OFFSET` or a key). Reads are sent again on a new
@@ -208,15 +214,96 @@ your own process, persist an id with the queued write and pass it as
 `{ mutationId }` (see [`examples/exactly-once.ts`](examples/exactly-once.ts)).
 The server keeps ids for 24 hours (`realtime.mutation_window`).
 
-`batch` sends its statements together: there is no interactive
-transaction, so a statement cannot use a value an earlier one returned
-(except through SQL itself, such as `last_insert_rowid()` or a subquery).
-`rowsAffected` is the total over the statements.
+`batch` sends its statements together, so a statement cannot use a value
+an earlier one returned (except through SQL itself, such as
+`last_insert_rowid()` or a subquery). `rowsAffected` is the total over
+the statements. When the program must read, decide and then write, use a
+[transaction](#transactions).
 
 Schema changes (`CREATE`, `ALTER`, `DROP`) need the `ddl` scope, run alone
 in an `exec`, and cannot carry a mutation id: if the connection drops
 after one was sent, the call rejects with `UnknownOutcomeError` and you
 decide whether to check and run it again.
+
+## Transactions
+
+`db.tx` runs a callback inside one transaction. It commits when the
+callback resolves, rolls back when it throws, and returns the callback's
+value. Statements sent through `tx` see the transaction's own writes;
+nobody else sees them before the commit.
+
+```ts
+const left = await db.tx(async (tx) => {
+  const qty = await tx.queryValue<number>('SELECT qty FROM stock WHERE sku = ?', [sku])
+  if (!qty) throw new Error('sold out')            // throwing rolls back
+  await tx.exec('UPDATE stock SET qty = qty - 1 WHERE sku = ?', [sku])
+  await tx.exec('INSERT INTO orders(sku) VALUES (?)', [sku])
+  return qty - 1                                   // resolving commits
+})
+```
+
+`tx` has `query`, `queryOne`, `queryValue`, `queryRaw` and `exec`, with
+the arguments they take on `db` (and no `maxRows`: a read returns at most
+10,000 rows).
+
+- **It holds the database's only writer**, so every other write to the
+  database waits until it ends. Keep it short, send its statements
+  through `tx` and not `db`, and use `db.batch` when the statements do
+  not depend on each other's results.
+- **The lease.** The server rolls a transaction back after
+  `db.session?.txIdleMs` without a statement (5 s by default) or 30 s in
+  all, and when its connection drops. Calls on `tx`, and `db.tx` itself,
+  then reject with `TxExpiredError` (code `tx_expired`): nothing was
+  applied, and nothing is replayed on the new connection. Run `db.tx`
+  again.
+- **A failed statement leaves the transaction open**: catch the error
+  to go on, or let it out to roll back.
+- **A commit whose answer is lost** with the connection rejects with
+  `UnknownOutcomeError`: it may have applied. With
+  `db.tx(fn, { mutationId })` the commit applies once per id, so the
+  transaction can be run again with the same id. The callback does run
+  again, so catch errors caused by rows the first run wrote.
+- Schema changes are refused inside a transaction, and a token limited
+  to tables or rows cannot begin one.
+- One transaction per connection at a time: further `db.tx` calls wait
+  their turn within `timeoutMs` (`pool` gives more connections). Do not
+  call `db.tx` inside a callback on a single connection: it waits for
+  itself.
+- On a server without the feature (`txIdleMs` is 0) `db.tx` rejects with
+  an `AzoraError` of code `unavailable`.
+
+## Row types from the schema
+
+`azora-gen` reads a database's schema and writes a TypeScript file with
+a row type per table and view:
+
+```sh
+AZORA_URL=... AZORA_TOKEN=... npx azora-gen --out src/azora-types.ts
+npx azora-gen --out src/azora-types.ts --check   # in CI: exits 1 when the file is out of date
+```
+
+```ts
+import type { Orders, NewOrders } from './azora-types.ts'
+
+const open = await db.query<Orders>('SELECT * FROM orders WHERE status = ?', ['open'])
+```
+
+A read-only API key is enough. Each table and view gets a row type named
+after it (`order_items` is `OrderItems`), each table an insert type
+(`NewOrderItems`, where generated columns are left out and columns with
+a default are optional), and `Tables` maps names to row types. Integer
+columns are typed `number`; pass `--bigint` for `number | bigint` when
+the database stores integers beyond 2^53 - 1. `BOOLEAN` columns are
+`number` too (a query returns the stored 1 or 0), `JSON` columns and
+columns without a declared type `unknown`, and `NUMERIC`, `DATE`,
+`DATETIME` and the like `number | string`.
+
+Flags: `--out <file>` (`-o`; standard output without it), `--check`
+(needs `--out`), `--tables a,b`, `--bigint`, `--url`, `--token`,
+`--env-file <path>`. The URL and token come from the flags, then
+`AZORA_URL` and `AZORA_TOKEN` (or `AZORA_API_KEY`) in the environment,
+then the env file (`.env` when present). From code:
+`import { readSchema, generateTypes } from '@azora-db/client/typegen'`.
 
 ## Live queries
 
@@ -249,11 +336,29 @@ await live.close()
   changed, the database was restored), it takes a new snapshot and the
   event has `reset: true`.
 - **Verifiable.** `await live.verify()` compares a checksum of the local
-  rows with the server's.
+  rows with the server's; `verifyEvery` does it on a timer.
 
 Options: `where`, `key` (one row), `orderBy` (column, `[column, 'desc']`,
-several, or a comparator) and `map` (convert each row object, for example
-to a class).
+several, or a comparator), `map` (convert each row object, for example
+to a class), and `verifyEvery` with `onVerify`:
+
+```ts
+const open = await db.live<Order>('orders', {
+  where: "status = 'open'",
+  verifyEvery: 30_000, // ms; compare with the server's checksum every 30 s
+  onVerify: (r) => {
+    if (!r.match) console.warn('orders: checksum mismatch, resyncing', r)
+  },
+})
+open.lastVerify   // result of the last periodic check, or null
+open.mismatches   // 0 in normal operation
+```
+
+A mismatch means a bug or corruption, never normal operation: the query
+takes a new snapshot by itself and listeners get an event with
+`reset: true`. `onVerify` is called for matching checks too. Checks pause
+while disconnected and stop on `close()`. With React:
+`useLiveQuery('orders', { verifyEvery: 30_000, onVerify })`.
 
 Filters are evaluated by the server on every change with SQLite's
 comparison rules and no type conversion. Write them as text (`=`, `!=`,
@@ -362,8 +467,10 @@ ends up in your client bundle. Only queries, mutations and actions that
 are not `internal` appear on `db.units`. Without the type argument
 `Database` is unchanged and `db.units.x` is untyped.
 
-- **Any credential can call**, including a client token limited to some
-  tables or rows, which cannot run SQL: the unit decides what the caller
+- **A call needs the unit's scope**: `read` for a query, `write` for a
+  mutation or an action. A unit that declares `access: 'any'` can be
+  called by every credential, including a client token limited to some
+  tables or rows, which cannot write with SQL: the unit decides what the caller
   may do from `ctx.auth` (its kind, principal, subject, scopes, claims).
   This is how a browser does controlled writes.
 - **Every call carries a fresh mutation id** and is sent again with the
@@ -480,6 +587,33 @@ for await (const o of db.storage.listAll({ prefix: 'avatars/' })) { … }
 await db.storage.delete(obj.id)
 ```
 
+**Resuming an upload after a restart.** `uploadResumable` continues by
+itself after a failed chunk. To continue in another process or page
+load, store the session URL and pass it to `resumeUpload` (also
+`Storage.resumeUpload`) with the same content:
+
+```ts
+import { resumeUpload } from '@azora-db/client'
+
+// Start: remember the session URL.
+await db.storage.uploadResumable(file, {
+  path: 'videos/intro.mp4',
+  onSession: (url) => localStorage.setItem('upload:intro', url),
+})
+
+// Later, in a new page load or process: the same content and the URL.
+const obj = await resumeUpload(localStorage.getItem('upload:intro')!, file, {
+  onProgress: (sent, total) => console.log(sent / total),
+})
+```
+
+The session URL carries the right to finish the upload and needs no API
+key or token: keep it private (do not log or share it). Sessions expire
+24 hours after they were opened by default
+(`storage.upload_session_ttl` on the server). An expired, completed or
+aborted session fails with `not_found`, and a body whose length differs
+from the one the upload started with fails with `invalid`.
+
 Browsers hold tokens, not API keys, so they upload through a **signed
 upload URL** your backend creates, which can also write the new file's id
 into a row in the same transaction:
@@ -492,6 +626,16 @@ const { url } = await db.storage.signUploadUrl({ maxSize: 2 << 20, allowedTypes:
 import { uploadToSignedUrl } from '@azora-db/client'
 await uploadToSignedUrl(url, file)
 ```
+
+A browser whose client token has the `write` scope can ask for the link
+itself, over its connection, with no round trip through your backend:
+
+```ts
+const { url } = await db.signUploadUrl({ bucket: 'avatars', maxSize: 2 << 20, allowedTypes: 'image/*' })
+await uploadToSignedUrl(url, file)
+```
+
+A token limited to some tables or rows gets no link.
 
 `db.signUrl(objectId)` signs a download URL over the realtime connection
 and works with tokens too. In SQL, `azora_url(column)` returns signed
@@ -506,7 +650,8 @@ links with the rows.
 | `ConnectionError` | The server could not be reached, or did not report its key for a URL without one (only from `connect`). |
 | `TimeoutError` | The call ran past its timeout. When the client was disconnected, the message says why. |
 | `UnitError` | A [unit](#units) threw: `code`, `message`, `data`, `unit`. |
-| `UnknownOutcomeError` | A schema change (or a `unitsAdmin` change) was sent and the connection dropped before its answer. |
+| `UnknownOutcomeError` | A schema change, a transaction's commit or a `unitsAdmin` change was sent and the connection dropped before its answer. |
+| `TxExpiredError` | A [transaction](#transactions) was rolled back by the server: its lease ran out or its connection was lost. |
 | `ClosedError` | The database or subscription was closed. |
 
 Every call takes `{ signal, timeoutMs }`. Rate limits (`resource_exhausted`
@@ -522,10 +667,16 @@ once instead of waiting for the timeout.
   `mutationId` and retry with it.
 - **Live queries and subscriptions** deliver every committed change of
   published tables once, in commit order, in consistent steps.
-- **No interactive transactions**: use `batch`.
+- **A transaction holds the database's single writer** and lives at
+  most 30 s (5 s without a statement) by default; it is lost with its
+  connection and never run again for you.
 - **One statement per call**; `ATTACH`, `VACUUM`, transaction control and
   pragma assignments are refused by the server.
-- **Tokens limited to tables or filters cannot run SQL**; they subscribe.
+- **A token with pinned filters cannot run SQL**; it subscribes. A token
+  limited to tables reads those tables with SQL and cannot write with it.
+- **Access policies** of the database may refuse a statement, a
+  subscription or a unit call that the credential's scopes allow
+  (`permission_denied`).
 - The server allows 1,000 requests per second per connection by default
   (`realtime.message_rate`); beyond it requests are delayed, not failed.
   Raise the setting, or use `pool`, for more.
@@ -620,7 +771,7 @@ The wire protocol is specified in the engine's
 [`docs/protocol.md`](../azora-engine/docs/protocol.md). Source layout:
 
 ```
-src/codec.ts, messages.ts     binary encoding and the 27 message types
+src/codec.ts, messages.ts     binary encoding and the 28 message types
 src/noise.ts, channel.ts      Noise IK/XX, framing, chunking, rekeying
 src/transport.ts, platform/   WebSocket; TCP and native cipher for Node
 src/config.ts, discovery.ts   options, connection URLs, the server key of a URL without one
