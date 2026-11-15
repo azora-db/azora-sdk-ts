@@ -6,8 +6,120 @@
 /** A value read from SQLite: integers are numbers (bigint beyond 2^53), blobs Uint8Array. */
 export type SqlValue = null | number | bigint | string | Uint8Array
 
-/** What a statement argument may be: booleans are stored as 1/0, Dates as unix milliseconds. */
-export type SqlArg = SqlValue | boolean | undefined | Date
+/**
+ * What a statement argument may be: booleans are stored as 1/0, Dates as
+ * unix milliseconds, and a `ctx.storage.upload(...)` is stored as a file
+ * whose id takes its place.
+ */
+export type SqlArg = SqlValue | boolean | undefined | Date | FileUpload
+
+/** A stored file. */
+export interface StoredFile {
+  id: string
+  bucket: string
+  /** The file's path in its bucket ("" for none). */
+  path: string
+  name: string
+  contentType: string
+  size: number
+  sha256: string
+  metadata: { [key: string]: string }
+  /** Image dimensions, when the file is an image. */
+  width?: number
+  height?: number
+  /** Unix milliseconds. */
+  createdAt: number
+}
+
+/** Options of a file a unit stores. */
+export interface FileOptions {
+  /** Default: the bucket named `default`. */
+  bucket?: string
+  /** A key unique within the bucket (`"invoices/2026/7.pdf"`). */
+  path?: string
+  /** The file name (the download name; the type is detected from it and the content). */
+  name?: string
+  contentType?: string
+  metadata?: { [key: string]: string }
+  /** Replace the content of the file at `path` (its id stays). */
+  overwrite?: boolean
+  /** Keep the file when no row references it any more (`put` always keeps). */
+  keep?: boolean
+}
+
+/**
+ * A file waiting to be stored: pass it as a statement argument, once. The
+ * file is stored in the statement's transaction and the argument becomes
+ * its id, so the file exists if and only if the row does.
+ */
+export interface FileUpload {
+  readonly '~upload': true
+}
+
+/** What a signed upload link may store (the grant of `ctx.storage.uploadUrl`). */
+export interface UploadGrant {
+  bucket?: string
+  path?: string
+  overwrite?: boolean
+  /** Comma-separated content types (`"image/png,image/jpeg"`, `"image/*"`). */
+  allowed_types?: string
+  max_size?: number
+  keep?: boolean
+  metadata?: { [key: string]: string }
+  /** Store the new file's id in this row's column, in the upload's transaction. */
+  table?: string
+  column?: string
+  /** The column that identifies the row (default `rowid`) and its value. */
+  key?: string
+  key_value?: string
+}
+
+/** Reading files: `ctx.storage` in every unit. Calls are synchronous (`await` works too). */
+export interface StorageReader {
+  /** The file, or null when there is none with that id. */
+  stat(id: string): StoredFile | null
+  /** The file at a path of a bucket (default bucket `default`), or null. */
+  statPath(path: string, bucket?: string): StoredFile | null
+  /** The content (at most `units.max_file_bytes`; check `stat(id).size` first for large files). */
+  read(id: string): Uint8Array
+  /** The content as UTF-8 text. */
+  text(id: string): string
+  /**
+   * A signed download link, valid for `ttl` seconds (default: the
+   * server's). `download` serves the file as an attachment, under that
+   * name when it is a string.
+   */
+  url(id: string, opts?: { ttl?: number; download?: boolean | string }): string
+}
+
+/** Reading and writing files: `ctx.storage` in mutations and actions. */
+export interface Storage extends StorageReader {
+  /**
+   * A file for a statement argument:
+   * `ctx.db.exec('UPDATE users SET avatar = ? WHERE id = ?', ctx.storage.upload(bytes, { name }), id)`.
+   * It belongs to the rows that reference it, and is deleted with the last of them unless `keep`.
+   */
+  upload(content: string | Uint8Array, opts?: FileOptions): FileUpload
+  /**
+   * Stores a file on its own, kept until deleted. In a mutation it is
+   * part of the transaction: a mutation that throws stores nothing. In an
+   * action it is stored at once (inside `ctx.db.tx`, use `upload` with
+   * the callback's db instead).
+   */
+  put(content: string | Uint8Array, opts?: FileOptions): StoredFile
+  /**
+   * Deletes a file, in the transaction like `put`. False when there is
+   * none. A file rows still reference is refused unless `force`, which
+   * sets those columns to NULL.
+   */
+  delete(id: string, opts?: { force?: boolean }): boolean
+  /**
+   * A signed upload link: whoever holds it can upload one file under the
+   * grant, without a credential. This is how a unit lets its caller
+   * upload after checking what the caller may do.
+   */
+  uploadUrl(grant?: UploadGrant, opts?: { ttl?: number }): { url: string; expiresAt: number }
+}
 
 /** A row as an object keyed by column name. */
 export type Row = { [column: string]: SqlValue }
@@ -46,8 +158,12 @@ export interface Db extends DbReader {
 
 /** Who called the unit. */
 export interface Auth {
-  /** An API key, a client token, the dashboard or admin API, or a schedule, onChange or job run. */
-  kind: 'key' | 'token' | 'admin' | 'system'
+  /**
+   * An API key, a client token, the dashboard or admin API, a schedule,
+   * onChange or job run, or `public`: an HTTP request without a
+   * credential to a unit declared `http: 'public'`.
+   */
+  kind: 'key' | 'token' | 'admin' | 'system' | 'public'
   /** `key:<name>`, the token's subject, `admin:<id>`, `system`, or `job:<id>` in a job. */
   principal: string
   /** The client token's subject (`"user:42"`), else "". */
@@ -185,6 +301,23 @@ export interface FetchResponse {
   bytes(): Promise<Uint8Array>
 }
 
+/** The request of a unit called over plain HTTP (`ctx.request`). */
+export interface HttpRequest {
+  method: string
+  /** What follows the unit's name in the URL: "" or "/...". */
+  path: string
+  /** The first value of each query parameter. */
+  query: { [name: string]: string }
+  /** Each header under its lower-case name (several values joined with ", "); never the credential. */
+  headers: { [name: string]: string }
+  /** The body as text, as it came: what a webhook's signature is computed over. */
+  body: string
+  /** The body's bytes, for content that is not text. */
+  bytes: Uint8Array
+  /** The client's address. */
+  ip: string
+}
+
 /** What every unit receives. */
 export interface BaseCtx {
   readonly db: DbReader
@@ -204,6 +337,10 @@ export interface BaseCtx {
   uuid(): string
   readonly crypto: Crypto
   readonly unit: UnitInfo
+  /** The database's stored files. */
+  readonly storage: StorageReader
+  /** The HTTP request, when the unit was called over plain HTTP (it declares `http`); else null. */
+  readonly request: HttpRequest | null
 }
 
 /** ctx in a query: reads only, one consistent snapshot. */
@@ -212,6 +349,7 @@ export interface QueryCtx extends BaseCtx {}
 /** ctx in a mutation: one write transaction. */
 export interface MutationCtx extends BaseCtx {
   readonly db: Db
+  readonly storage: Storage
   /** Jobs: run a mutation or action later, in this mutation's transaction. */
   readonly scheduler: Scheduler
 }
@@ -219,6 +357,7 @@ export interface MutationCtx extends BaseCtx {
 /** ctx in an action: no implicit transaction, and fetch. */
 export interface ActionCtx extends BaseCtx {
   readonly db: Db
+  readonly storage: Storage
   /** Jobs: run a mutation or action later (written at once, or in `ctx.db.tx`). */
   readonly scheduler: Scheduler
   /** An HTTP request (actions only). */
