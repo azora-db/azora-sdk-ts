@@ -53,12 +53,20 @@ const samples: Msg[] = [
   { type: MsgType.Verify, reqId: 11, subId: 5 },
   { type: MsgType.Verified, reqId: 11, subId: 5, epoch: 7n, checkpoint: 42, rows: 10, sum: 2n ** 64n - 1n },
   { type: MsgType.Sign, reqId: 12, objectId: 'o1', ttlSeconds: 60 },
+  { type: MsgType.SignUpload, reqId: 13, grant: '{"bucket":"avatars","max_size":1048576}', ttlSeconds: 300 },
+  { type: MsgType.SignUpload, reqId: 14, grant: '', ttlSeconds: 0 },
   { type: MsgType.Signed, reqId: 12, url: 'https://x/o/db/o1?sig=1', expiresAtMs: 1 },
   { type: MsgType.GoAway, reason: 'shutdown', retryAfterMs: 1000 },
   { type: MsgType.Call, reqId: 13, unit: 'checkout', args: '{"cartId":"c1"}', mutationId: 'm-3' },
   { type: MsgType.Call, reqId: 14, unit: 'ping', args: '', mutationId: '' },
   { type: MsgType.Returned, reqId: 13, ok: true, value: '{"orderId":7}', replayed: true, errCode: '', errMessage: '', errData: '' },
   { type: MsgType.Returned, reqId: 14, ok: false, value: '', replayed: false, errCode: 'not_found', errMessage: 'no such cart', errData: '{"cart":"c1"}' },
+  { type: MsgType.TxBegin, reqId: 16 },
+  { type: MsgType.TxBegun, reqId: 16, txId: 2 ** 40, idleMs: 5000 },
+  { type: MsgType.TxStmt, reqId: 17, txId: 2 ** 40, sql: 'SELECT ?', args: vals, query: true },
+  { type: MsgType.TxStmt, reqId: 18, txId: 3, sql: 'DELETE FROM t', args: null, query: false },
+  { type: MsgType.TxEnd, reqId: 19, txId: 3, commit: true, mutation: 'm-4' },
+  { type: MsgType.TxEnd, reqId: 20, txId: 3, commit: false, mutation: '' },
   { type: MsgType.UnitAdmin, reqId: 15, op: 'deploy', body: '{"bundle":"x"}' },
   { type: MsgType.UnitAdminResult, reqId: 15, body: '{"version":1}' },
 ]
@@ -71,7 +79,7 @@ describe('messages', () => {
       expect(m.type, `sample ${i}`).toBe(Number(type))
       expect(hex(encode(m)), `sample ${i} (type ${type})`).toBe(want)
     })
-    expect(new Set(samples.map((m) => m.type)).size).toBe(27) // every message type
+    expect(new Set(samples.map((m) => m.type)).size).toBe(32) // every message type
   })
 
   test('decode what Go encoded, and round-trip', () => {
@@ -91,7 +99,8 @@ describe('messages', () => {
     for (const [, bytes] of golden) {
       const b = unhex(bytes)
       for (let n = 0; n < b.length; n++) expect(() => decode(b.subarray(0, n)), `${bytes} cut to ${n}`).toThrow(CodecError)
-      expect(() => decode(Uint8Array.of(...b, 0))).toThrow(/trailing/)
+      // After a Welcome a byte is its trailing idle lease, which is never sent as 0.
+      expect(() => decode(Uint8Array.of(...b, 0))).toThrow(b[0] === MsgType.Welcome ? /tx idle 0 is not sent/ : /trailing/)
     }
   })
 
