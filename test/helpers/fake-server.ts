@@ -46,7 +46,7 @@ export class FakeConn {
       }
       this.send({
         type: MsgType.Welcome, sessionId: `s${this.server.accepted}`, serverTimeMs: Date.now(), heartbeatMs: this.server.heartbeatMs,
-        maxMessage: 16 << 20, principal: 'test', scopes: ['read', 'write'], maxSubscriptions: 100,
+        maxMessage: 16 << 20, principal: 'test', scopes: ['read', 'write'], maxSubscriptions: 100, txIdleMs: this.server.txIdleMs,
       })
       return
     }
@@ -85,6 +85,8 @@ export class FakeServer {
   readonly conns: FakeConn[] = []
   accepted = 0
   heartbeatMs = 15_000
+  /** Welcome's idle lease of interactive transactions (0: the server has none). */
+  txIdleMs = 0
   /** While true, connection attempts fail. */
   down = false
   /** Returns an error code to refuse a Hello carrying this credential. */
