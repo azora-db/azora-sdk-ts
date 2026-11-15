@@ -5,7 +5,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
-import { basename, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
 import {
@@ -26,6 +26,8 @@ Commands:
       --dry-run               check the bundle on the server without publishing it
       --note <text>           a note for the deploy history
   dev [dir]                   publish, then publish again on every save
+  build [dir] --out <file>    bundle the units directory into a file (and <file>.map), without
+                              a server: for 'azora units deploy', the admin API, or a CI artifact
   list                        the active deploy's units
   history [--limit n]         the deploy history
   rollback <version>          make an earlier deploy active again
@@ -120,7 +122,9 @@ function size(n: number): string {
 function trigger(u: UnitInfo): string {
   if (u.kind === 'schedule') return `${u.cron ? `cron ${u.cron}` : `every ${u.every}`}${u.mode === 'action' ? ' (action)' : ''}`
   if (u.kind === 'onChange') return `on ${u.table} ${(u.ops ?? []).join(',')}${u.mode === 'action' ? ' (action)' : ''}`
-  return u.internal ? 'internal' : ''
+  const how = u.internal ? 'internal' : u.access === 'any' ? 'any credential' : ''
+  const http = u.http === 'public' ? 'http public' : u.http === 'auth' ? 'http' : ''
+  return [how, http].filter(Boolean).join(', ')
 }
 
 function unitLines(units: readonly UnitInfo[]): string[] {
@@ -223,6 +227,7 @@ interface Flags {
   package?: string
   remote: boolean
   interval?: string
+  out?: string
 }
 
 function int(s: string | undefined, what: string, dflt: number): number {
@@ -261,6 +266,29 @@ async function publish(dir: string, f: Flags, io: IO, connector: Connector): Pro
   } finally {
     await db.close()
   }
+}
+
+/**
+ * Writes the bundle to a file, and its source map beside it. The bundle
+ * is loaded as the engine loads it first, so a file that is written is a
+ * bundle the server will accept: its definitions were read.
+ */
+async function buildToFile(dir: string, f: Flags, io: IO): Promise<void> {
+  if (!f.out) throw new UsageError('usage: azora-units build [dir] --out <file>')
+  const b = await bundleUnits(dir)
+  const units = manifestOf(evaluateBundle(b.bundle)) as UnitInfo[]
+  if (units.length === 0) throw new BundleError(`${show(b.dir)} exports no units (export query, mutation, action, schedule or onChange definitions)`)
+  const file = resolve(f.out)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, b.bundle)
+  if (b.sourceMap) writeFileSync(`${file}.map`, b.sourceMap)
+  if (f.json) {
+    io.out(json({ file, sourceMap: b.sourceMap ? `${file}.map` : '', bytes: b.bundle.length, units }))
+    return
+  }
+  io.out(`Wrote ${show(file)} (${size(b.bundle.length)}) with ${units.length} unit${units.length === 1 ? '' : 's'}:`)
+  for (const l of unitLines(units)) io.out(l)
+  io.out(`Publish it with: azora units deploy <database> ${show(file)}${b.sourceMap ? ` --source-map ${show(file)}.map` : ''}`)
 }
 
 async function dev(dir: string, f: Flags, io: IO, connector: Connector): Promise<void> {
@@ -421,6 +449,7 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
         go: { type: 'string' },
         package: { type: 'string' },
         remote: { type: 'boolean', default: false },
+        out: { type: 'string', short: 'o' },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false },
       },
@@ -449,6 +478,9 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
         break
       case 'dev':
         await dev(pos[0] ?? 'units', f, io, connector)
+        break
+      case 'build':
+        await buildToFile(pos[0] ?? 'units', f, io)
         break
       case 'list': {
         const r = await withDb(f, connector, (a) => a.list())
