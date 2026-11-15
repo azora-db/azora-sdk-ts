@@ -2,6 +2,108 @@
 
 ## Unreleased
 
+### Values come back as stored
+
+- With an engine that has the matching fix, `query` and `tx.query` return
+  what SQLite stores, whatever type the column declares, as live rows
+  already did. A `BOOLEAN` column now reads 1 or 0 (it read true or
+  false through `query` and 1 or 0 through `live`), and a query that
+  returned an integer or text from a `DATE`, `DATETIME` or `TIMESTAMP`
+  column answers; before, it never did.
+- `azora-gen` types `BOOLEAN` columns `number`, like `BOOL`.
+- `resumeUpload` and `ResumeUploadOptions` are exported from the package
+  root as well as `Storage.resumeUpload`.
+
+### Interactive transactions
+
+- `db.tx(async (tx) => { … })` runs a transaction over several requests:
+  read, decide and write. It commits when the callback resolves, rolls
+  back when it throws, and returns the callback's value. `tx.query`,
+  `tx.queryOne`, `tx.queryValue`, `tx.queryRaw` and `tx.exec` see the
+  transaction's own writes. A transaction holds the database's single
+  writer, under the server's lease (5 s idle, 30 s in all by default).
+- `TxExpiredError` (code `tx_expired`, `ErrorCode.TxExpired`): the lease
+  ran out or the transaction's connection was lost; nothing was applied.
+  A transaction is never replayed after a reconnect. A commit whose
+  answer is lost rejects with `UnknownOutcomeError`.
+- `db.tx(fn, { mutationId })` makes the commit apply exactly once, with
+  the same ids as `exec` and `batch`.
+- `db.session?.txIdleMs` is the server's idle lease; 0 means the server has
+  no interactive transactions, and `db.tx` then rejects with
+  `unavailable` without sending anything.
+- The client name sent in Hello now ends with ` +tx`.
+
+### Live queries: periodic verification
+
+- `verifyEvery` (milliseconds) in the options of `db.live()` and
+  `useLiveQuery`: the live query compares its rows' checksum with the
+  server's on that interval and takes a new snapshot on a mismatch, like
+  `VerifyEvery` in the Go SDK.
+- `onVerify(result)` is called after every finished periodic check,
+  matching or not; `LiveQuery.lastVerify` and `LiveQuery.mismatches`
+  report the last result and the number of mismatches.
+
+### Resuming an upload in another process
+
+- `Storage.resumeUpload(sessionUrl, body, options)` continues a
+  resumable upload in a later process or page load from its session URL
+  alone, without a credential.
+- `storage.uploadResumable` takes `onSession(sessionUrl)`, called once
+  when the session opens, to learn the URL to store.
+- Resuming reports progress from the offset the server holds. An
+  expired, completed or aborted session fails with `not_found`; a body
+  of another length than the upload started with fails with `invalid`
+  before anything is sent.
+
+### Row types from the schema
+
+- `azora-gen` (a `bin` of the package) writes TypeScript row types
+  (`Orders`, `NewOrders`, `Tables`) from a database's schema. `--check`
+  exits 1 when the file is missing or out of date, for CI. A read-only
+  API key is enough.
+- `@azora-db/client/typegen` exports `readSchema` and `generateTypes`
+  to do the same from code.
+
+### Units: files and HTTP
+
+- `UnitInfo.http` says whether a unit answers plain HTTP requests
+  (`'auth'` or `'public'`). Units can now use `ctx.storage` and be
+  called over HTTP; see `packages/units/CHANGELOG.md`.
+
+### Signed upload URLs over the connection
+
+- `db.signUploadUrl(grant)` asks the server for a signed upload URL over
+  the realtime connection, so a browser whose client token has the `write`
+  scope gets one itself (`db.storage.signUploadUrl` needs an API key).
+  `sessionUrlOf(url)` gives the URL for resumable sessions under the same
+  grant. Needs an engine that lists `sign-upload` in its features.
+
+### Access control in the engine
+
+Nothing changes in the SDK's API; these engine changes show through it.
+
+- **Sign-in with an identity provider.** `token` may be a JSON Web Token
+  of a provider the database accepts (`azora meta issuer add`), next to
+  an API key or a client token. A token provider function works the same
+  way: return the provider's fresh token when the server says the
+  credential expired.
+- **Access policies are enforced.** A statement, a subscription, a unit
+  call or a storage request can fail with `permission_denied` although
+  the credential has the scope, when a policy of the database refuses its
+  table, unit or bucket. An open subscription a new policy no longer
+  allows ends with `permission_denied`.
+- **A client token limited to tables can read them with SQL** (it could
+  only subscribe). It still cannot write with SQL, and a token with
+  pinned filters still cannot run SQL.
+
+### Units: access
+
+- The engine now checks a unit's `access` before running it: a call needs
+  the `read` scope for a query and the `write` scope for a mutation or an
+  action, unless the unit declares another (`access: 'any'` lets every
+  credential call it). A credential without the scope gets
+  `permission_denied`. `UnitInfo.access` reports what each unit needs.
+
 ### Units: jobs, run statuses, local tests
 
 - `db.unitsAdmin.jobs.list({ state, unit, limit })`, `jobs.cancel(id)`
