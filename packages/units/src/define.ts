@@ -27,8 +27,19 @@ export interface UnitDefinition<K extends UnitKind = UnitKind, A = unknown, R = 
   /** The JSON Schema of the arguments, or null for any. */
   readonly args: JsonSchema | null
   readonly internal: I
+  /** Present when the definition declares one; otherwise the kind decides. */
+  readonly access?: UnitAccess
+  /** Present when the unit answers plain HTTP requests. */
+  readonly http?: true | 'public'
   readonly description: string
 }
+
+/**
+ * The scope a credential needs to call a unit: `read`, `write`, or `any`
+ * for every credential of the database (the unit then decides from
+ * `ctx.auth` what its caller may do).
+ */
+export type UnitAccess = 'any' | 'read' | 'write'
 
 /** A schedule unit's definition. */
 export interface ScheduleDefinition<M extends RunMode = RunMode> extends UnitDefinition<'schedule', undefined, unknown, true> {
@@ -53,23 +64,74 @@ export type ChangeOp = 'insert' | 'update' | 'delete'
 interface CallableOptions<I extends boolean> {
   /** Clients cannot call the unit; other units can (`ctx.run`). */
   internal?: I
+  /**
+   * The scope a credential needs to call the unit. Default: `read` for a
+   * query, `write` for a mutation or an action. `any` lets every
+   * credential call it, a read-only client token included: check
+   * `ctx.auth` in the handler.
+   */
+  access?: UnitAccess
+  /**
+   * Answer plain HTTP requests at `/units/v1/<database>/<unit>`: a JSON
+   * body is the unit's arguments, `ctx.request` the request itself.
+   * `true` needs a credential (`Authorization: Bearer ...`), checked like
+   * any call. `'public'` needs none: the unit checks its caller itself,
+   * as a webhook does with a signature.
+   */
+  http?: boolean | 'public'
   /** Shown in the dashboard and to AI agents (MCP). */
   description?: string
 }
 
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
+const ACCESS: readonly string[] = ['any', 'read', 'write']
 
-function define<K extends UnitKind>(kind: K, def: { args?: ArgsSpec | undefined; internal?: boolean; description?: string; handler: unknown }): Record<string, unknown> {
+function define<K extends UnitKind>(kind: K, def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): Record<string, unknown> {
   if (typeof def !== 'object' || def === null) throw new TypeError(`azora units: ${kind}() takes an object ({ handler, ... })`)
   if (typeof def.handler !== 'function') throw new TypeError(`azora units: ${kind}() needs a handler function`)
+  if (def.access !== undefined && !ACCESS.includes(def.access)) throw new TypeError(`azora units: ${kind}() access must be "any", "read" or "write"`)
+  if (def.http !== undefined && typeof def.http !== 'boolean' && def.http !== 'public') throw new TypeError(`azora units: ${kind}() http must be true or "public"`)
+  if (def.http && def.internal) throw new TypeError(`azora units: ${kind}() an internal unit cannot be called over HTTP`)
   return {
     '~azora': 1,
     kind,
     handler: def.handler,
     args: def.args === undefined ? null : argsSchema(def.args),
     internal: def.internal ?? false,
+    ...(def.access !== undefined && { access: def.access }),
+    ...(def.http !== undefined && def.http !== false && { http: def.http }),
     description: def.description ?? '',
   }
+}
+
+/** What `httpResponse` returns: a result the server sends as the HTTP response it describes. */
+export interface HttpResponse {
+  readonly '~http': 1
+  readonly status: number
+  readonly headers: { readonly [name: string]: string }
+  readonly body: unknown
+}
+
+/**
+ * A unit's answer to an HTTP request, when it is more than JSON data: a
+ * status, headers, and a body sent as it is (a string as text, a
+ * Uint8Array as bytes, anything else as JSON). Called another way (the
+ * SDK, another unit), the caller gets this object as the result.
+ *
+ * ```ts
+ * export const stripeWebhook = mutation({
+ *   http: 'public',
+ *   handler(ctx, event) {
+ *     // ... verify ctx.request.headers['stripe-signature'] over ctx.request.body
+ *     return httpResponse('ok', { status: 200 })
+ *   },
+ * })
+ * ```
+ */
+export function httpResponse(body?: unknown, init: { status?: number; headers?: { [name: string]: string } } = {}): HttpResponse {
+  const status = init.status ?? 200
+  if (!Number.isInteger(status) || status < 200 || status > 599) throw new TypeError('azora units: httpResponse status must be an integer from 200 to 599')
+  return { '~http': 1, status, headers: { ...init.headers }, body: body === undefined ? null : body }
 }
 
 type Def<K extends UnitKind, A, R, I extends boolean> = UnitDefinition<K, A, Awaited<R>, I>
@@ -90,7 +152,7 @@ export function query<const S extends ArgsSpec, R, I extends boolean = false>(
 export function query<R, A = unknown, I extends boolean = false>(
   def: CallableOptions<I> & { args?: undefined; handler: (ctx: QueryCtx, args: A) => R },
 ): Def<'query', A, R, I>
-export function query(def: { args?: ArgsSpec | undefined; internal?: boolean; description?: string; handler: unknown }): unknown {
+export function query(def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): unknown {
   return define('query', def)
 }
 
@@ -111,7 +173,7 @@ export function mutation<const S extends ArgsSpec, R, I extends boolean = false>
 export function mutation<R, A = unknown, I extends boolean = false>(
   def: CallableOptions<I> & { args?: undefined; handler: (ctx: MutationCtx, args: A) => R },
 ): Def<'mutation', A, R, I>
-export function mutation(def: { args?: ArgsSpec | undefined; internal?: boolean; description?: string; handler: unknown }): unknown {
+export function mutation(def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): unknown {
   return define('mutation', def)
 }
 
@@ -126,7 +188,7 @@ export function action<const S extends ArgsSpec, R, I extends boolean = false>(
 export function action<R, A = unknown, I extends boolean = false>(
   def: CallableOptions<I> & { args?: undefined; handler: (ctx: ActionCtx, args: A) => R },
 ): Def<'action', A, R, I>
-export function action(def: { args?: ArgsSpec | undefined; internal?: boolean; description?: string; handler: unknown }): unknown {
+export function action(def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): unknown {
   return define('action', def)
 }
 
