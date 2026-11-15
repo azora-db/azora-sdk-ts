@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { AzoraError, UnitError } from '@azora-db/client'
-import { mutation, query, v } from '../src/index.ts'
+import { createHmac } from 'node:crypto'
+import { action, httpResponse, mutation, query, UnitError as Thrown, v } from '../src/index.ts'
 import { createTestEnv, jobBackoff, type TestCallOptions, type TestEnvOptions } from '../src/testing.ts'
 import * as units from './fixtures/local/index.ts'
 
@@ -264,6 +265,32 @@ describe('createTestEnv', () => {
     await expect(t2.call('fetcher', { url: 'ftp://x' })).rejects.toThrow('ctx.fetch: only http and https URLs (got "ftp://x")')
   })
 
+  test('access: a credential needs the unit\'s scope, unless the unit declares another', async () => {
+    const t = createTestEnv({
+      read: query({ handler: () => 1 }),
+      change: mutation({ handler: () => 2 }),
+      open: mutation({ access: 'any', handler: (ctx) => ctx.auth.has('write') }),
+      locked: query({ access: 'write', handler: () => 4 }),
+    })
+    const reader = { auth: { kind: 'token' as const, subject: 'user:1', scopes: ['read'] } }
+    const writer = { auth: { kind: 'key' as const, scopes: ['write'] } }
+    expect(await t.call('read', undefined, reader)).toBe(1)
+    await expect(t.call('change', undefined, reader)).rejects.toMatchObject({
+      code: 'permission_denied', message: 'permission_denied: unit "change" needs the write scope (declare access: "any" to let every credential call it)',
+    })
+    expect(await t.call('open', undefined, reader)).toBe(false)
+    await expect(t.call('locked', undefined, reader)).rejects.toMatchObject({ code: 'permission_denied' })
+    await expect(t.call('read', undefined, writer)).rejects.toMatchObject({ code: 'permission_denied' }) // write does not include read
+    expect(await t.call('change', undefined, writer)).toBe(2)
+    expect(await t.call('locked', undefined, { auth: { kind: 'key', scopes: ['admin'] } })).toBe(4)
+    // The default caller has read and write; cli and admin calls are not checked.
+    expect(await t.call('change')).toBe(2)
+    expect(await t.call('change', undefined, { ...reader, as: 'cli' })).toBe(2)
+    expect(t.runs({ status: 'rejected' }).map((r) => r.unit)).toEqual(['change', 'locked', 'read'])
+
+    expect(() => createTestEnv({ bad: { ...query({ handler: () => 1 }), access: 'admin' } })).toThrow('unit bad: access must be "any", "read" or "write"')
+  })
+
   test('calls run one at a time; definitions are checked like a deploy', async () => {
     const t = env()
     await Promise.all([1, 2, 3, 4, 5].map(() => t.call('bump', { by: 1 })))
@@ -277,5 +304,173 @@ describe('createTestEnv', () => {
     expect(two).toBe(2)
     // @ts-expect-error n is a number
     await expect(typed.call('m', { n: 'x' })).rejects.toThrow('must be integer')
+  })
+})
+
+describe('ctx.storage in the local test environment', () => {
+  const files = {
+    save: mutation({
+      args: { title: v.string(), text: v.string() },
+      handler: (ctx, { title, text }) => ctx.db.exec('INSERT INTO docs(title, file) VALUES (?, ?)', title, ctx.storage.upload(text, { name: `${title}.txt`, metadata: { title } })).lastInsertId,
+    }),
+    read: query({
+      args: { id: v.int() },
+      handler: (ctx, { id }) => {
+        const fileId = ctx.db.value<string>('SELECT file FROM docs WHERE id = ?', id) as string
+        return { file: ctx.storage.stat(fileId), text: ctx.storage.text(fileId), n: ctx.storage.read(fileId).length, url: ctx.storage.url(fileId, { download: 'a.txt' }) }
+      },
+    }),
+    put: mutation({ args: { path: v.string(), overwrite: v.optional(v.boolean()) }, handler: (ctx, { path, overwrite }) => ctx.storage.put(Uint8Array.of(1, 2, 3), { path, overwrite: overwrite === true }) }),
+    drop: mutation({ args: { id: v.string() }, handler: (ctx, { id }) => ctx.storage.delete(id) }),
+    putThenFail: mutation({ handler: (ctx) => { ctx.storage.put('x', { path: 'lost.txt' }); throw new Error('no') } }),
+    twice: mutation({
+      handler: (ctx) => {
+        const up = ctx.storage.upload('once')
+        ctx.db.exec("INSERT INTO docs(title, file) VALUES ('a', ?)", up)
+        ctx.db.exec("INSERT INTO docs(title, file) VALUES ('b', ?)", up)
+      },
+    }),
+    act: action({
+      handler: async (ctx) => {
+        const kept = ctx.storage.put('kept', { path: 'kept.txt' })
+        await ctx.db.tx(async (db) => {
+          db.exec("INSERT INTO docs(title, file) VALUES ('undone', ?)", ctx.storage.upload('undone'))
+          throw new Error('undo')
+        }).catch(() => {})
+        return kept.id
+      },
+    }),
+    grant: mutation({ handler: (ctx) => ctx.storage.uploadUrl({ bucket: 'avatars', max_size: 100 }, { ttl: 60 }) }),
+    big: mutation({ handler: (ctx) => ctx.storage.put('x'.repeat(200)) }),
+    inQuery: query({ handler: (ctx) => (ctx.storage as unknown as { put(c: string): unknown }).put('x') }),
+    readArg: query({ handler: (ctx) => ctx.db.all('SELECT ?', (ctx.storage as unknown as { upload(c: string): never }).upload('x')) }),
+  }
+  const make = (limits = {}) => createTestEnv(files, { schema: 'CREATE TABLE docs(id INTEGER PRIMARY KEY, title TEXT, file FILE)', now: START, random, limits })
+
+  test('a mutation stores a file with its row; a query reads it', async () => {
+    const t = make()
+    const id = await t.call('save', { title: 'notes', text: 'hello' })
+    const r = await t.call('read', { id })
+    const file = r.file
+    if (!file) throw new Error('the file is missing')
+    expect(file).toMatchObject({ bucket: 'default', path: '', name: 'notes.txt', contentType: 'text/plain', size: 5, metadata: { title: 'notes' }, createdAt: START })
+    expect(file.id).toMatch(/^obj_[a-z2-7]{26}$/)
+    expect(file.sha256).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824')
+    expect([r.text, r.n]).toEqual(['hello', 5])
+    expect(r.url).toContain(`/storage/v1/o/test/${file.id}?`)
+    expect(r.url).toContain('dl=a.txt')
+    // The test sees the same files, and can seed its own.
+    expect(t.storage.list().map((f) => f.name)).toEqual(['notes.txt'])
+    expect(t.storage.text(file.id)).toBe('hello')
+    const seeded = t.storage.put('seeded', { path: 'seed/a.txt' })
+    expect(t.storage.stat(seeded.id)).toMatchObject({ path: 'seed/a.txt', size: 6 })
+    expect(t.storage.read('obj_nope')).toBeNull()
+    t.close()
+  })
+
+  test('files follow the transaction: a throw stores nothing, an action commits its put at once', async () => {
+    const t = make()
+    await expect(t.call('putThenFail')).rejects.toThrow('no')
+    expect(t.storage.list()).toEqual([])
+    const kept = await t.call('act')
+    expect(t.storage.list().map((f) => f.id)).toEqual([kept]) // the upload inside the rolled back ctx.db.tx is gone
+    expect(t.db.value('SELECT count(*) FROM docs')).toBe(0)
+    t.close()
+  })
+
+  test('paths are unique unless overwritten; delete says whether there was a file', async () => {
+    const t = make()
+    const a = await t.call('put', { path: 'r/a.bin' })
+    await expect(t.call('put', { path: 'r/a.bin' })).rejects.toThrow('object exists: default/r/a.bin')
+    const again = await t.call('put', { path: 'r/a.bin', overwrite: true })
+    expect(again.id).toBe(a.id)
+    expect(await t.call('drop', { id: a.id })).toBe(true)
+    expect(await t.call('drop', { id: a.id })).toBe(false)
+    t.close()
+  })
+
+  test('what is refused, with the engine\'s words', async () => {
+    const t = make({ maxFileBytes: 100 })
+    await expect(t.call('inQuery')).rejects.toThrow('a query cannot store files (make it a mutation or an action)')
+    await expect(t.call('big')).rejects.toThrow('ctx.storage: the content is 200 bytes, over units.max_file_bytes (100)')
+    await expect(t.call('twice')).rejects.toThrow('this upload was already used')
+    expect(t.db.value('SELECT count(*) FROM docs')).toBe(0)
+    await expect(t.call('readArg')).rejects.toThrow('a query cannot store files')
+    const g = await t.call('grant')
+    expect(g.url).toContain('/storage/v1/u/test?')
+    expect(g.expiresAt).toBe(START + 60_000)
+    t.close()
+  })
+})
+
+describe('t.request: units over plain HTTP, locally', () => {
+  const api = {
+    sum: query({ http: true, args: { a: v.number(), b: v.number() }, handler: (_ctx, { a, b }) => ({ sum: a + b }) }),
+    echo: query({ http: 'public', handler: (ctx, args: unknown) => ({ args: args ?? null, request: ctx.request, kind: ctx.auth.kind }) }),
+    hook: mutation({
+      http: 'public',
+      handler: (ctx, event: { type: string }) => {
+        const r = ctx.request
+        if (!r || !ctx.crypto.timingSafeEqual(ctx.crypto.hmac(ctx.env['SECRET'] ?? '', r.body), r.headers['x-signature'] ?? '')) throw new Thrown('permission_denied', 'bad signature')
+        ctx.db.exec('INSERT INTO seen(type) VALUES (?)', event.type)
+        return httpResponse({ ok: true }, { status: 202, headers: { 'X-Handled': 'yes' } })
+      },
+    }),
+    page: query({ http: 'public', handler: () => httpResponse('<h1>hi</h1>', { headers: { 'Content-Type': 'text/html' } }) }),
+    bytes: query({ http: 'public', handler: () => httpResponse(Uint8Array.of(0, 255)) }),
+    boom: query({ http: 'public', handler: () => { throw new Thrown('conflict', 'taken', { id: 7 }) } }),
+    hidden: mutation({ handler: () => 1 }),
+  }
+  const make = () => createTestEnv(api, { schema: 'CREATE TABLE seen(type TEXT)', env: { SECRET: 's3' } })
+
+  test('a JSON body or the query are the arguments; ctx.request is the request', async () => {
+    const t = make()
+    const r = await t.request('echo', { path: '/a/b', query: { x: 1 }, headers: { 'X-Test': 'y', Authorization: 'Bearer nope' }, body: { n: 1 }, ip: '203.0.113.9' })
+    expect(r.status).toBe(200)
+    expect(r.headers['content-type']).toBe('application/json')
+    expect(r.json()).toEqual({
+      args: { n: 1 }, kind: 'public',
+      request: { method: 'POST', path: '/a/b', query: { x: '1' }, headers: { 'x-test': 'y', 'content-type': 'application/json' }, body: '{"n":1}', bytes: { $bytes: 'eyJuIjoxfQ==' }, ip: '203.0.113.9' },
+    })
+    expect(((await t.request('echo', { query: { a: 'b' } })).json() as { args: unknown }).args).toEqual({ a: 'b' })
+    expect(((await t.request('echo', { body: 'plain text' })).json() as { args: unknown }).args).toBeNull()
+    expect((await t.request('echo', { headers: { 'Content-Type': 'application/json' }, body: '{"n":' })).status).toBe(400)
+    // Outside HTTP there is no request.
+    expect(await t.call('echo')).toMatchObject({ request: null, kind: 'key' })
+    t.close()
+  })
+
+  test('credentials, units that are not offered, errors as statuses', async () => {
+    const t = make()
+    expect((await t.request('sum', { body: { a: 1, b: 2 } })).status).toBe(401)
+    expect((await t.request('sum', { body: { a: 1, b: 2 }, auth: { subject: 'user:1' } })).json()).toEqual({ sum: 3 })
+    expect((await t.request('sum', { body: { a: 'x', b: 2 }, auth: {} })).status).toBe(400)
+    expect((await t.request('sum', { body: { a: 1, b: 2 }, auth: { scopes: ['write'] } })).status).toBe(403) // a query needs read
+    expect((await t.request('hidden', { auth: {} })).status).toBe(404)
+    expect((await t.request('nope')).status).toBe(404)
+    const boom = await t.request('boom')
+    expect([boom.status, boom.json()]).toEqual([409, { error: { code: 'conflict', message: 'taken', data: { id: 7 } } }])
+    expect(t.runs({ status: 'rejected' }).map((r) => [r.unit, r.trigger])).toContainEqual(['hidden', 'http'])
+    t.close()
+  })
+
+  test('a webhook checks its signature and shapes its own response', async () => {
+    const t = make()
+    const body = '{"type":"paid"}'
+    const sig = createHmac('sha256', 's3').update(body).digest('hex')
+    const ok = await t.request('hook', { headers: { 'Content-Type': 'application/json', 'X-Signature': sig }, body })
+    expect([ok.status, ok.headers['x-handled'], ok.json()]).toEqual([202, 'yes', { ok: true }])
+    expect((await t.request('hook', { headers: { 'Content-Type': 'application/json', 'X-Signature': 'nope' }, body })).status).toBe(403)
+    expect(t.db.all('SELECT type FROM seen')).toEqual([{ type: 'paid' }])
+    // An Idempotency-Key runs the mutation once.
+    const again = { headers: { 'Content-Type': 'application/json', 'X-Signature': sig, 'Idempotency-Key': 'evt_1' }, body }
+    expect((await t.request('hook', again)).headers['azora-replayed']).toBeUndefined()
+    expect((await t.request('hook', again)).headers['azora-replayed']).toBe('true')
+    expect(t.db.value('SELECT count(*) FROM seen')).toBe(2)
+    const page = await t.request('page')
+    expect([page.body, page.headers['content-type']]).toEqual(['<h1>hi</h1>', 'text/html'])
+    expect([...(await t.request('bytes')).bytes]).toEqual([0, 255])
+    expect((await t.request('page', { method: 'HEAD' })).body).toBe('')
+    t.close()
   })
 })
