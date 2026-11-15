@@ -1,13 +1,14 @@
 /** The public client: `connect()` returns a {@link Database}. */
 import { Client } from './client.ts'
-import { toValue, type InputValue, type Value } from './codec.ts'
+import type { InputValue, Value } from './codec.ts'
 import { resolveOptions, type ConnectOptions, type ResolvedOptions } from './config.ts'
 import { Discovery } from './discovery.ts'
 import { AzoraError, ErrorCode } from './errors.ts'
 import { LiveQuery, type LiveOptions } from './live.ts'
 import type { Session } from './session.ts'
-import { Storage } from './storage.ts'
+import { sessionUrlOf, Storage, type UploadGrant } from './storage.ts'
 import { Subscription } from './subscription.ts'
+import { normalize, runTx, toObjects, unpack, type Args, type Transaction, type TxOptions } from './tx.ts'
 import type { ExecResult, QueryResult, Row, Statement, Stats, SubscribeSpec } from './types.ts'
 import { decodeUnitJSON, encodeUnitJSON, unitError, UnitsAdmin, type UnitCallOptions, type Units } from './units.ts'
 import { isDDL, newMutationId, type CallOptions } from './util.ts'
@@ -30,42 +31,6 @@ export interface WriteOptions extends CallOptions {
 
 /** A statement of `batch`: text, `[text, args]`, or a `sql` statement. */
 export type BatchStatement = string | readonly [sql: string, args?: readonly InputValue[]] | Statement
-
-type Args = readonly InputValue[]
-
-function normalize(args: Args | undefined): Value[] | null {
-  if (!args || args.length === 0) return null
-  const out = new Array<Value>(args.length)
-  for (let i = 0; i < args.length; i++) {
-    try {
-      out[i] = toValue(args[i])
-    } catch (e) {
-      throw new TypeError(`azora: argument ${i + 1}: ${(e as Error).message}`)
-    }
-  }
-  return out
-}
-
-/** Splits the (sql, args?, opts?) | (statement, opts?) call shapes. */
-function unpack<O>(a: string | Statement, b?: Args | O, c?: O): { sql: string; args: Value[] | null; opts: O | undefined } {
-  if (typeof a === 'string') {
-    if (b !== undefined && !Array.isArray(b)) return { sql: a, args: null, opts: b as O }
-    return { sql: a, args: normalize(b as Args | undefined), opts: c }
-  }
-  return { sql: a.sql, args: normalize(a.args), opts: (b as O | undefined) ?? c }
-}
-
-function toObjects<T>(columns: readonly string[], rows: readonly Value[][]): T[] {
-  const n = columns.length
-  const out = new Array<T>(rows.length)
-  for (let r = 0; r < rows.length; r++) {
-    const row = rows[r] as Value[]
-    const obj: Row = {}
-    for (let i = 0; i < n; i++) obj[columns[i] as string] = row[i] ?? null
-    out[r] = obj as T
-  }
-  return out
-}
 
 /**
  * A connection to one database. It stays connected in the background
@@ -216,8 +181,8 @@ export class Database<M = unknown> {
   /**
    * Runs several writes in one transaction: all of them apply, or none.
    * Like `exec` it applies exactly once. The statements are sent together
-   * (there is no interactive transaction: a statement cannot depend on the
-   * result of an earlier one, except through SQL itself). `rowsAffected`
+   * (a statement cannot depend on the result of an earlier one, except
+   * through SQL itself; for that see {@link Database.tx}). `rowsAffected`
    * is the total over the statements, `lastInsertId` the last insert's.
    */
   async batch(statements: readonly BatchStatement[], opts?: WriteOptions): Promise<ExecResult> {
@@ -234,6 +199,44 @@ export class Database<M = unknown> {
     })
     const r = await this.pick().write(opts?.mutationId ?? newMutationId(), stmts, false, opts)
     return { rowsAffected: r.rowsAffected, lastInsertId: r.lastInsertId, replayed: r.replayed }
+  }
+
+  /**
+   * Runs fn inside an interactive transaction: read, decide and write
+   * over several requests, all applied together or not at all. It commits
+   * when fn resolves and resolves with fn's value; when fn throws it rolls
+   * back and rejects with that error.
+   *
+   * ```ts
+   * const left = await db.tx(async (tx) => {
+   *   const stock = await tx.queryValue<number>('SELECT qty FROM stock WHERE sku = ?', [sku])
+   *   if (!stock) throw new Error('sold out')
+   *   await tx.exec('UPDATE stock SET qty = qty - 1 WHERE sku = ?', [sku])
+   *   await tx.exec('INSERT INTO orders(sku) VALUES (?)', [sku])
+   *   return stock - 1
+   * })
+   * ```
+   *
+   * The transaction holds the database's writer, so every other write
+   * waits for it: keep it short and do no slow work inside. The server
+   * rolls it back when it stays without a statement longer than
+   * `session.txIdleMs` (5 s by default) or open longer than
+   * `realtime.tx_max_duration` (30 s).
+   *
+   * It lives on one connection and is never replayed: when the connection
+   * drops or the lease runs out, the calls on `tx` and `db.tx` itself
+   * reject with a {@link TxExpiredError} and nothing was applied. Only a
+   * connection lost while the commit was on its way leaves the outcome
+   * unknown (UnknownOutcomeError); pass a `mutationId` and run the
+   * transaction again with it to be safe: it then cannot apply twice. A
+   * server without interactive transactions rejects with code
+   * `unavailable`. One connection runs one transaction at a time; further
+   * `db.tx` calls wait their turn (or use another connection of the pool).
+   */
+  tx<T>(fn: (tx: Transaction) => T | Promise<T>, opts?: TxOptions): Promise<T> {
+    let best = this.clients[0] as Client
+    for (const c of this.clients) if (c.txQueue < best.txQueue) best = c
+    return runTx(best, fn, opts)
   }
 
   /**
@@ -314,6 +317,34 @@ export class Database<M = unknown> {
     if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 0xffffffff) throw new TypeError(`azora: ttlSeconds ${ttlSeconds} out of range`)
     const s = await this.pick().sign(objectId, ttlSeconds, opts)
     return { url: s.url, expiresAt: new Date(s.expiresAtMs) }
+  }
+
+  /**
+   * A signed upload URL, over the realtime connection: a link that lets a
+   * client without credentials upload one file under a grant (`PUT` or
+   * `POST` the file to `url`, or open resumable sessions at `sessionUrl`).
+   * It works with a client token that has the `write` scope, so a browser
+   * can ask for one itself; `db.storage.signUploadUrl` does the same over
+   * HTTP with an API key. A token limited to tables or rows gets none.
+   *
+   * ```ts
+   * const { url } = await db.signUploadUrl({ bucket: 'avatars', maxSize: 2 << 20, allowedTypes: 'image/*' })
+   * await uploadToSignedUrl(url, file)
+   * ```
+   */
+  async signUploadUrl(g: Omit<UploadGrant, 'signal'> = {}, opts?: CallOptions): Promise<{ url: string; sessionUrl: string; expiresAt: Date }> {
+    const ttl = g.ttlSeconds ?? 0
+    if (!Number.isInteger(ttl) || ttl < 0 || ttl > 0xffffffff) throw new TypeError(`azora: ttlSeconds ${ttl} out of range`)
+    const f = this.discovery?.features
+    if (f && !f.includes('sign-upload')) {
+      throw new AzoraError(ErrorCode.Unavailable, 'this server does not sign upload URLs over the connection (its /.well-known/azora.json does not list "sign-upload" in features): use db.storage.signUploadUrl')
+    }
+    const grant = JSON.stringify({
+      bucket: g.bucket, path: g.path, overwrite: g.overwrite, allowed_types: g.allowedTypes, max_size: g.maxSize, keep: g.keep,
+      metadata: g.metadata, table: g.table, column: g.column, key: g.key, key_value: g.keyValue,
+    })
+    const s = await this.pick().signUpload(grant === '{}' ? '' : grant, ttl, opts)
+    return { url: s.url, sessionUrl: sessionUrlOf(s.url), expiresAt: new Date(s.expiresAtMs) }
   }
 
   /**
