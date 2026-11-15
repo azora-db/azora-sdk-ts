@@ -4,7 +4,7 @@
  * they change only at checkpoints, which end on transaction boundaries.
  */
 import type { InputValue, Value } from './codec.ts'
-import { ClosedError } from './errors.ts'
+import { ClosedError, RetryVerifyError } from './errors.ts'
 import type { Filter } from './filter.ts'
 import { keyString, rowHash } from './replica.ts'
 import type { Subscription } from './subscription.ts'
@@ -24,6 +24,20 @@ export interface LiveOptions<T> {
   orderBy?: string | readonly [string, 'asc' | 'desc'] | ReadonlyArray<string | readonly [string, 'asc' | 'desc']> | ((a: T, b: T) => number)
   /** Converts a row object (column name to value) to the type the application uses. */
   map?: (row: Row) => T
+  /**
+   * When positive, compares the rows' checksum with the server's at this
+   * interval (milliseconds) and resynchronizes (a new snapshot) on a
+   * mismatch. A mismatch means a bug or corruption somewhere, never normal
+   * operation. Absent or 0: no periodic check.
+   */
+  verifyEvery?: number
+  /**
+   * Runs after every finished periodic comparison, with its result;
+   * `match` is false right before the query resynchronizes. Checks that
+   * could not compare (connection lost, rows changing) report nothing and
+   * run again later.
+   */
+  onVerify?: (result: VerifyResult) => void
 }
 
 /** One row change of a live query. */
@@ -102,6 +116,12 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
   private loaded = false
   private failure: Error | null = null
   private pump: Promise<void>
+  private readonly onVerify: ((result: VerifyResult) => void) | undefined
+  private verifyTimer: ReturnType<typeof setInterval> | undefined
+  private verifying = false
+  private verifyRetry = false // the last check must run again after the next update
+  private verified: VerifyResult | null = null
+  private mismatched = 0
 
   /** @internal Use `db.live()`. */
   constructor(sub: Subscription, table: string, o: LiveOptions<T>) {
@@ -117,6 +137,12 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
     })
     this.ready.catch(() => {}) // observed through `error` and `subscribe` too
     this.pump = this.run(resolveReady, rejectReady)
+    this.onVerify = o.onVerify
+    if (o.verifyEvery !== undefined && o.verifyEvery > 0) {
+      this.verifyTimer = setInterval(() => this.autoVerify(), o.verifyEvery)
+      // The check alone must not keep a Node process alive.
+      ;(this.verifyTimer as { unref?: () => void }).unref?.()
+    }
   }
 
   private comparator(o: LiveOptions<T>['orderBy']): ((a: Entry<T>, b: Entry<T>) => number) | undefined {
@@ -158,8 +184,10 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
           resolveReady()
         }
         if (ev.reset || ev.changes.length > 0) this.emit(ev)
+        if (this.verifyRetry) this.autoVerify()
       }
     } catch (e) {
+      this.stopVerify()
       if (!(e instanceof ClosedError)) this.failure = e as Error
       rejectReady(e as Error)
       this.emit({ reset: false, changes: [], rows: this.rows })
@@ -192,6 +220,52 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
     }
     if (u.reset || changes.length > 0) this.sorted = null
     return { reset: u.reset, changes, rows: this.rows }
+  }
+
+  private stopVerify(): void {
+    if (this.verifyTimer !== undefined) clearInterval(this.verifyTimer)
+    this.verifyTimer = undefined
+    this.verifyRetry = false
+  }
+
+  private checksum = (): { rows: number; sum: bigint } => {
+    let sum = 0n
+    for (const e of this.entries.values()) sum += rowHash(this.table, e.key, e.values, e.keyFloats, e.rowFloats)
+    return { rows: this.entries.size, sum }
+  }
+
+  /**
+   * One periodic check (`verifyEvery`). Skips while the first snapshot is
+   * missing or the previous check is still running (it waits while the
+   * connection is down). When the rows were changing, the subscription
+   * stops the next update where the server computed its checksum: the
+   * check runs again right after that update, or at the next tick.
+   */
+  private autoVerify(): void {
+    if (this.verifyTimer === undefined || this.verifying || !this.loaded || this.sub.closed) return
+    this.verifying = true
+    this.verifyRetry = false
+    this.sub.verify(this.checksum).then(
+      (res) => {
+        this.verifying = false
+        if (this.verifyTimer === undefined) return // closed meanwhile
+        this.verified = res
+        if (!res.match) this.mismatched++
+        try {
+          this.onVerify?.(res)
+        } catch (e) {
+          queueMicrotask(() => {
+            throw e
+          })
+        }
+        if (!res.match) this.sub.resync()
+      },
+      (e: unknown) => {
+        this.verifying = false
+        // Anything else (timeout, connection lost) waits for the next tick.
+        if (e instanceof RetryVerifyError && this.verifyTimer !== undefined) this.verifyRetry = true
+      },
+    )
   }
 
   private emit(ev: LiveEvent<T>): void {
@@ -288,11 +362,17 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
    */
   async verify(opts?: CallOptions): Promise<VerifyResult> {
     await this.ready
-    return this.sub.verify(() => {
-      let sum = 0n
-      for (const e of this.entries.values()) sum += rowHash(this.table, e.key, e.values, e.keyFloats, e.rowFloats)
-      return { rows: this.entries.size, sum }
-    }, opts)
+    return this.sub.verify(this.checksum, opts)
+  }
+
+  /** The result of the last finished periodic check (`verifyEvery`), if any. */
+  get lastVerify(): VerifyResult | null {
+    return this.verified
+  }
+
+  /** How many periodic checks found a mismatch. It stays 0 in normal operation. */
+  get mismatches(): number {
+    return this.mismatched
   }
 
   /** Drops the local rows and takes a new snapshot (after a verify mismatch). */
@@ -307,6 +387,7 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
 
   /** Stops the live query. */
   async close(): Promise<void> {
+    this.stopVerify()
     await this.sub.close()
     await this.pump
   }
