@@ -11,8 +11,9 @@ import { createRequire } from 'node:module'
 import { performance } from 'node:perf_hooks'
 import type { DatabaseSync } from 'node:sqlite'
 import { AzoraError, UnitError as CallError, type UnitJob, type UnitRun, type Units } from '@azora-db/client'
-import type { Row } from '../ctx.ts'
+import type { FileOptions, HttpRequest, Row, StoredFile } from '../ctx.ts'
 import { isUnitDefinition, isUnitName } from '../define.ts'
+import { FILES_SCHEMA, FileStore, PendingUpload } from './files.ts'
 import { bytesOf, clientStringify, engineStringify, parseJSON } from './json.ts'
 import { compileSchema, takesObject, validate, type Schema } from './schema.ts'
 import { checkSQL, rowObject, sqlArg, TABLE_PREFIX, type Bound } from './sql.ts'
@@ -55,7 +56,7 @@ export interface TestEnvOptions {
   /** Runs of a job before it is marked failed (`units.job_attempts`, default 5). */
   jobAttempts?: number
   /** The engine's per-call limits (defaults: the engine's). */
-  limits?: { maxStatements?: number; maxRows?: number; maxValueBytes?: number; maxJobs?: number; fetchCalls?: number; fetchBytes?: number }
+  limits?: { maxStatements?: number; maxRows?: number; maxValueBytes?: number; maxFileBytes?: number; maxJobs?: number; fetchCalls?: number; fetchBytes?: number }
   /** Called with every ctx.log line as it is written. */
   onLog?: (line: TestLogLine) => void
 }
@@ -146,6 +147,10 @@ interface Def {
   kind: Kind
   runs: Runs
   internal: boolean
+  /** The scope a credential needs ('' for schedule and onChange units). */
+  access: string
+  /** How it answers plain HTTP: '' (not), 'auth' or 'public'. */
+  http: '' | 'auth' | 'public'
   handler: (ctx: unknown, args: unknown) => unknown
   schema: Schema | null
   table: string
@@ -187,8 +192,28 @@ function load(units: Record<string, unknown>): Map<string, Def> {
       fail('mode must be "mutation" or "action"')
       continue
     }
+    const declared = o['access'] == null ? '' : String(o['access'])
+    if (!['', 'any', 'read', 'write'].includes(declared)) {
+      fail('access must be "any", "read" or "write"')
+      continue
+    }
+    if (trigger && declared !== '') {
+      fail(`a ${kind} unit cannot be called, so it takes no access`)
+      continue
+    }
+    const h = o['http']
+    if (h !== undefined && h !== null && typeof h !== 'boolean' && h !== 'public') {
+      fail('http must be true (callable over HTTP with a credential) or "public" (without one)')
+      continue
+    }
+    const http = h === 'public' ? 'public' : h === true ? 'auth' : ''
+    if (http !== '' && (trigger || Boolean(o['internal']))) {
+      fail('an internal, schedule or onChange unit cannot be called over HTTP')
+      continue
+    }
     const def: Def = {
       name, kind, runs: trigger ? (mode as Runs) : (kind as Runs), internal: trigger || Boolean(o['internal']),
+      access: trigger ? '' : declared || (kind === 'query' ? 'read' : 'write'), http,
       handler: o['handler'] as Def['handler'], schema, table: '', ops: [], batch: 100,
     }
     if (kind === 'schedule' && !o['cron'] === !o['every']) {
@@ -320,7 +345,7 @@ interface Frame {
 }
 
 interface Caller {
-  kind: 'key' | 'token' | 'admin' | 'system'
+  kind: 'key' | 'token' | 'admin' | 'system' | 'public'
   principal: string
   subject: string
   scopes: string[]
@@ -336,6 +361,8 @@ interface Request {
   external: boolean
   trigger: string
   noValidate?: boolean
+  /** The request of a call over plain HTTP (ctx.request). */
+  http?: HttpRequest
   inTx?: () => void
   afterAction?: () => void
   job?: JobRow
@@ -517,9 +544,14 @@ class Call {
     if (++this.stmts > this.t.limits.maxStatements) this.limit(`more than units.max_statements (${this.t.limits.maxStatements}) statements`)
   }
 
-  sqlArgs(args: unknown[]): Bound[] {
+  sqlArgs(args: unknown[]): Array<Bound | PendingUpload> {
     return args.map((a, i) => {
       try {
+        if (a instanceof PendingUpload) {
+          if (a.used) throw new Error('this upload was already used: call ctx.storage.upload again for another statement')
+          a.used = true
+          return a
+        }
         return sqlArg(a)
       } catch (e) {
         return this.throw(`argument ${i + 1}: ${(e as Error).message}`)
@@ -570,7 +602,7 @@ class Call {
 
   query(f: Frame, sql: string, args: unknown[], max: number): Record<string, unknown>[] {
     this.check(sql)
-    const vals = this.sqlArgs(args)
+    const vals = this.sqlArgs(args).map((v) => (v instanceof PendingUpload ? this.throw('an upload can only be the argument of a write (ctx.db.exec)') : v))
     return this.withRead(f, () => {
       const st = this.t.raw.prepare(sql)
       st.setReadBigInts(true)
@@ -582,8 +614,10 @@ class Call {
     })
   }
 
-  exec(sql: string, vals: Bound[]): { rowsAffected: number; lastInsertId: number } {
-    const r = this.t.raw.prepare(sql).run(...vals)
+  exec(sql: string, vals: Array<Bound | PendingUpload>): { rowsAffected: number; lastInsertId: number } {
+    // An upload is stored in the statement's transaction and replaced by the new file's id.
+    const bound = vals.map((v) => (v instanceof PendingUpload ? this.t.files.store(v).id : v))
+    const r = this.t.raw.prepare(sql).run(...bound)
     return { rowsAffected: Number(r.changes), lastInsertId: Number(r.lastInsertRowid) }
   }
 
@@ -629,6 +663,74 @@ class Call {
       tx: (fn: unknown) => this.tx(f, fn),
     }
     return db
+  }
+
+  /** ctx.storage (the engine's newStorage in files.go, with its messages). */
+  newStorage(f: Frame): Record<string, unknown> {
+    const files = this.t.files
+    const max = this.t.limits.maxFileBytes
+    const id = (v: unknown): string => (typeof v === 'string' && v !== '' ? v : this.throw("ctx.storage: the file's id is required"))
+    const mayWrite = (what: string): void => {
+      if (f.kind === 'query') this.throw(`a query cannot ${what} (make it a mutation or an action)`)
+    }
+    const stage = (content: unknown, opts: unknown, keep: boolean): PendingUpload => {
+      if (content === null || content === undefined) this.throw('ctx.storage: the content is required: a string or a Uint8Array')
+      if (typeof content !== 'string' && !bytesOf(content)) this.throw('ctx.storage: the content must be a string or a Uint8Array')
+      const b = bytesArg(content)
+      if (b.length > max) this.throw(`ctx.storage: the content is ${b.length} bytes, over units.max_file_bytes (${max})`)
+      if (opts !== undefined && opts !== null && typeof opts !== 'object') this.throw('ctx.storage: the options must be an object')
+      const o = (opts ?? {}) as FileOptions
+      return new PendingUpload(new Uint8Array(b), { ...o, ...(o.metadata && { metadata: { ...o.metadata } }) }, keep || Boolean(o.keep))
+    }
+    const read = (v: unknown): Uint8Array => {
+      const file = this.withRead(f, () => files.stat(id(v)))
+      if (!file) this.throw(`ctx.storage: no file ${String(v)}`)
+      if (file.size > max) {
+        this.throw(`ctx.storage: file ${String(v)} is larger than units.max_file_bytes (${max}): check stat(id).size first, or hand out ctx.storage.url(id)`)
+      }
+      return this.withRead(f, () => files.read(file.id)) as Uint8Array
+    }
+    const ttl = (o: unknown): number => {
+      const t = (o as { ttl?: unknown } | undefined)?.ttl
+      if (t === undefined || t === null) return 0
+      if (typeof t !== 'number' || Number.isNaN(t) || t < 0 || t > 366 * 24 * 3600) this.throw('ctx.storage: ttl is a number of seconds, at most a year')
+      return t
+    }
+    return {
+      stat: (v: unknown) => this.withRead(f, () => files.stat(id(v))),
+      statPath: (path: unknown, bucket: unknown) => {
+        if (typeof path !== 'string' || path === '') this.throw('ctx.storage: the path is required')
+        return this.withRead(f, () => files.statPath(path as string, typeof bucket === 'string' ? bucket : undefined))
+      },
+      read,
+      text: (v: unknown) => new TextDecoder().decode(read(v)),
+      url: (v: unknown, o: unknown) => {
+        const fileId = id(v)
+        if (!this.withRead(f, () => files.stat(fileId))) this.throw(`ctx.storage: no file ${fileId}`)
+        const d = (o as { download?: unknown } | undefined)?.download
+        return files.url(fileId, ttl(o), typeof d === 'string' ? d : Boolean(d))
+      },
+      uploadUrl: (grant: unknown, o: unknown) => {
+        mayWrite('sign upload links')
+        if (grant !== undefined && grant !== null && (typeof grant !== 'object' || Array.isArray(grant))) this.throw('ctx.storage: the grant must be an object')
+        return files.uploadUrl((grant ?? {}) as Record<string, unknown>, ttl(o))
+      },
+      upload: (content: unknown, opts: unknown) => {
+        mayWrite('store files')
+        return stage(content, opts, false)
+      },
+      put: (content: unknown, opts: unknown): StoredFile => {
+        mayWrite('store files')
+        const up = stage(content, opts, true)
+        return this.withWrite(f, () => files.store(up))
+      },
+      delete: (v: unknown, o: unknown) => {
+        mayWrite('delete files')
+        void (o as { force?: boolean } | undefined)?.force // references are not counted here: every delete goes through
+        const fileId = id(v)
+        return this.withWrite(f, () => files.delete(fileId))
+      },
+    }
   }
 
   tx(f: Frame, fn: unknown): unknown {
@@ -714,6 +816,8 @@ class Call {
       },
       run: (name: unknown, args: unknown) => this.runUnit(f, name, args),
       fetch: (input: unknown, init: unknown) => this.fetch(f, input, init),
+      storage: this.newStorage(f),
+      request: this.req.http ? { ...this.req.http, query: { ...this.req.http.query }, headers: { ...this.req.http.headers }, bytes: new Uint8Array(this.req.http.bytes) } : null,
       scheduler: {
         after: (delay: unknown, name: unknown, args: unknown) => {
           let ms = this.number('ctx.scheduler.after', delay)
@@ -933,6 +1037,12 @@ function checkArgs(u: Def, args: string): string {
   return args
 }
 
+/** Unit.Allows: only credentials (a key or a token) are checked. */
+function allows(u: Def, c: Caller): boolean {
+  if (c.kind !== 'key' && c.kind !== 'token') return true
+  return u.access === 'any' || c.scopes.some((s) => s === u.access || s === 'admin')
+}
+
 const SYSTEM: Caller = { kind: 'system', principal: 'system', subject: '', scopes: [], tables: [], claims: {} }
 
 function caller(a: TestAuth | undefined): Caller {
@@ -961,6 +1071,7 @@ class TestEnvImpl {
   private changeSeq = 0
   private queue: Promise<unknown> = Promise.resolve()
   readonly db: TestDb
+  readonly files: FileStore
   readonly unitsProxy: Record<string, (args?: unknown, opts?: TestCallOptions) => Promise<unknown>>
 
   readonly o: TestEnvOptions
@@ -973,6 +1084,7 @@ class TestEnvImpl {
     this.raw.exec('PRAGMA foreign_keys = ON')
     for (const s of typeof o.schema === 'string' ? [o.schema] : (o.schema ?? [])) this.raw.exec(s)
     this.raw.exec(INTERNAL_SCHEMA)
+    this.raw.exec(FILES_SCHEMA)
     for (const u of this.units.values()) {
       if (u.kind === 'onChange' && !this.raw.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? COLLATE NOCASE").get(u.table)) {
         this.raw.close()
@@ -985,10 +1097,12 @@ class TestEnvImpl {
     this.clock = o.now === undefined ? Date.now() : o.now instanceof Date ? o.now.getTime() : o.now
     const l = o.limits ?? {}
     this.limits = {
-      maxStatements: l.maxStatements ?? 10_000, maxRows: l.maxRows ?? 100_000, maxValueBytes: l.maxValueBytes ?? 1 << 20, maxJobs: l.maxJobs ?? 100_000,
+      maxStatements: l.maxStatements ?? 10_000, maxRows: l.maxRows ?? 100_000, maxValueBytes: l.maxValueBytes ?? 1 << 20,
+      maxFileBytes: l.maxFileBytes ?? 16 << 20, maxJobs: l.maxJobs ?? 100_000,
       fetchCalls: l.fetchCalls ?? 50, fetchBytes: l.fetchBytes ?? 5 << 20,
     }
     this.jobAttempts = o.jobAttempts ?? 5
+    this.files = new FileStore(this.raw, () => 'obj_' + base32(this.random(16)), () => this.clock)
     const raw = this.raw
     const read = (sql: string, args: unknown[]) => {
       const st = raw.prepare(sql)
@@ -1039,7 +1153,12 @@ class TestEnvImpl {
       this.record(c, start, wall, 'rejected', err.text)
       throw err
     }
+    if (req.http) {
+      if (u.http === '') reject(new Failure('not_found', `no unit ${q(req.unit)} is callable over HTTP (a unit declares http: true)`))
+      if (u.http !== 'public' && req.caller.kind === 'public') reject(new Failure('permission_denied', `unit ${q(req.unit)} needs a credential`))
+    }
     if (req.external && u.internal) reject(new Failure('permission_denied', `unit ${q(req.unit)} is internal: only other units can run it`))
+    if (req.external && !allows(u, req.caller)) reject(new Failure('permission_denied', `unit ${q(req.unit)} needs the ${u.access} scope (declare access: "any" to let every credential call it)`))
     const size = Buffer.byteLength(req.args)
     if (size > this.limits.maxValueBytes) reject(new Failure('invalid', `arguments are ${size} bytes, over units.max_value_bytes (${this.limits.maxValueBytes})`))
     if (Buffer.byteLength(req.mutationId) > 128) reject(new Failure('invalid', 'mutation id longer than 128 bytes'))
@@ -1151,6 +1270,89 @@ class TestEnvImpl {
     const who = as === 'admin' ? caller({ kind: 'admin', ...opts.auth }) : opts.auth ? caller(opts.auth) : this.auth
     const trigger = as === 'client' ? 'call' : as
     return this.serial(() => this.answer(name, this.exec({ unit: name, args: argsJSON, mutationId, caller: who, external: as === 'client', trigger })))
+  }
+
+  /**
+   * A request to /units/v1/<database>/<unit>, answered as the server's
+   * handler does (pkg/azora/unitshttp): the JSON body or the query are the
+   * arguments, the unit's result or what it threw becomes the response.
+   */
+  request(name: string, init: TestRequest = {}): Promise<TestResponse> {
+    const method = (init.method ?? (init.body === undefined ? 'GET' : 'POST')).toUpperCase()
+    const headers: Record<string, string> = {}
+    for (const [k, v] of Object.entries(init.headers ?? {})) headers[k.toLowerCase()] = v
+    let bytes = new Uint8Array()
+    if (typeof init.body === 'string') bytes = new TextEncoder().encode(init.body)
+    else if (init.body instanceof Uint8Array) bytes = new Uint8Array(init.body)
+    else if (init.body !== undefined && init.body !== null) {
+      bytes = new TextEncoder().encode(JSON.stringify(init.body))
+      headers['content-type'] ??= 'application/json'
+    }
+    const text = new TextDecoder().decode(bytes)
+    const query: Record<string, string> = {}
+    for (const [k, v] of Object.entries(init.query ?? {})) query[k] = String(v)
+    const respond = (status: number, body: Uint8Array | string, type: string, extra: Record<string, string> = {}): TestResponse => {
+      const b = typeof body === 'string' ? new TextEncoder().encode(body) : body
+      const hd: Record<string, string> = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(type && { 'content-type': type }), ...extra }
+      const out = method === 'HEAD' || status === 204 || status === 304 ? new Uint8Array() : b
+      return { status, headers: hd, body: new TextDecoder().decode(out), bytes: out, json: () => JSON.parse(new TextDecoder().decode(out)) as unknown }
+    }
+    const error = (status: number, code: string, message: string, data?: string): TestResponse =>
+      // As the server writes its error answers: with a charset and a final newline.
+      respond(status, JSON.stringify({ error: { code, message, ...(data !== undefined && data !== '' && data !== 'null' && { data: JSON.parse(data) as unknown }) } }) + '\n', 'application/json; charset=utf-8')
+    // The arguments: a JSON body, or without a body the query as an object of strings.
+    let args = ''
+    if (text.trim() !== '') {
+      const ct = (headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
+      if (ct === 'application/json' || ct.endsWith('+json')) {
+        try {
+          JSON.parse(text)
+        } catch {
+          return Promise.resolve(error(400, 'invalid', 'the request body is declared as JSON and is not valid JSON'))
+        }
+        args = text
+      }
+    } else if (Object.keys(query).length > 0) args = JSON.stringify(query)
+    if (bytes.length > this.limits.maxValueBytes) {
+      return Promise.resolve(error(413, 'too_large', `the request body is larger than units.max_value_bytes (${this.limits.maxValueBytes})`))
+    }
+    const ip = init.ip ?? '127.0.0.1'
+    const who: Caller = init.auth ? caller(init.auth) : { kind: 'public', principal: `http:${ip}`, subject: '', scopes: [], tables: [], claims: {} }
+    const mutationId = headers['idempotency-key'] ?? ''
+    const http: HttpRequest = { method, path: init.path ?? '', query, headers, body: text, bytes, ip }
+    delete http.headers['authorization']
+    const STATUS: Record<string, number> = { invalid: 400, not_found: 404, permission_denied: 403, conflict: 409, resource_exhausted: 429 }
+    return this.serial(async () => {
+      let a: Answer
+      try {
+        a = await this.exec({ unit: name, args, mutationId, caller: who, external: true, trigger: 'http', http })
+      } catch (e) {
+        if (!(e instanceof Failure)) throw e
+        if (who.kind === 'public' && e.code === 'permission_denied') {
+          return error(401, 'unauthenticated', 'this unit needs a credential: send Authorization: Bearer with an API key or a token')
+        }
+        return error(STATUS[e.code] ?? 500, e.code, e.message)
+      }
+      const replayed: Record<string, string> = a.replayed ? { 'azora-replayed': 'true' } : {}
+      if (a.err) return { ...error(STATUS[a.err.code] ?? 500, a.err.code, a.err.message, a.err.data), headers: { ...error(500, '', '').headers, ...replayed } }
+      const value = a.value === '' ? 'null' : a.value
+      const parsed: unknown = JSON.parse(value)
+      if (typeof parsed !== 'object' || parsed === null || (parsed as Record<string, unknown>)['~http'] !== 1) return respond(200, value, 'application/json', replayed)
+      // The unit described its own response (httpResponse).
+      const r = parsed as { status?: number; headers?: Record<string, string>; body?: unknown }
+      const status = r.status ?? 200
+      if (!Number.isInteger(status) || status < 200 || status > 599) return error(500, 'internal', 'the unit answered with an invalid HTTP status')
+      const hd: Record<string, string> = { ...replayed }
+      for (const [k, v] of Object.entries(r.headers ?? {})) hd[k.toLowerCase()] = v
+      const b = r.body
+      let out: Uint8Array | string = ''
+      let type = ''
+      if (typeof b === 'string') [out, type] = [b, 'text/plain; charset=utf-8']
+      else if (typeof b === 'object' && b !== null && typeof (b as { $bytes?: unknown }).$bytes === 'string') {
+        ;[out, type] = [new Uint8Array(Buffer.from((b as { $bytes: string }).$bytes, 'base64')), 'application/octet-stream']
+      } else if (b !== null && b !== undefined) [out, type] = [JSON.stringify(b), 'application/json']
+      return respond(status, out, hd['content-type'] ?? type, hd)
+    })
   }
 
   private trigger(name: string, kind: 'schedule' | 'onChange'): Def {
@@ -1354,8 +1556,56 @@ export interface TestEnv<M = unknown> {
   runs(filter?: { unit?: string; status?: string }): UnitRun[]
   /** Every ctx.log line, oldest first. */
   logs(filter?: { unit?: string }): TestLogLine[]
+  /**
+   * Sends an HTTP request to a unit that declares `http`, as the server
+   * would answer it at `/units/v1/<database>/<unit>`. Without `auth` the
+   * request has no credential (the caller is `public`).
+   */
+  request(name: string, init?: TestRequest): Promise<TestResponse>
+  /** The files units see through `ctx.storage`: seed them before a call, look at them after. */
+  readonly storage: TestStorage
   /** Closes the database. */
   close(): void
+}
+
+/** A request of `t.request`. */
+export interface TestRequest {
+  /** Default: POST with a body, GET without. */
+  method?: string
+  /** What follows the unit's name in the URL (`"/items/7"`). */
+  path?: string
+  query?: Record<string, string | number | boolean>
+  headers?: Record<string, string>
+  /** A string or bytes as they are; anything else is sent as JSON. */
+  body?: unknown
+  /** The credential the request carries (default: none). */
+  auth?: TestAuth
+  /** The client's address (default 127.0.0.1). */
+  ip?: string
+}
+
+/** The answer of `t.request`. */
+export interface TestResponse {
+  status: number
+  /** Lower-case names. */
+  headers: Record<string, string>
+  /** The body as text. */
+  body: string
+  bytes: Uint8Array
+  /** The body parsed as JSON. */
+  json(): unknown
+}
+
+/** `t.storage`: the test's own access to the stored files. */
+export interface TestStorage {
+  /** Stores a file (kept until deleted), as a unit's `ctx.storage.put` does. */
+  put(content: string | Uint8Array, opts?: FileOptions): StoredFile
+  stat(id: string): StoredFile | null
+  /** The content, or null when there is no such file. */
+  read(id: string): Uint8Array | null
+  text(id: string): string | null
+  /** Every file, oldest first. */
+  list(): StoredFile[]
 }
 
 /**
@@ -1391,6 +1641,17 @@ export function createTestEnv<M>(units: M, options: TestEnvOptions = {}): TestEn
     retryJob: (id) => t.retryJob(id),
     runs: (f = {}) => t.runLog.filter((r) => (f.unit === undefined || r.unit === f.unit) && (f.status === undefined || r.status === f.status)),
     logs: (f = {}) => t.logLines.filter((l) => f.unit === undefined || l.unit === f.unit),
+    request: (name, init) => t.request(name, init),
+    storage: {
+      put: (content, opts = {}) => t.files.store(new PendingUpload(new Uint8Array(bytesArg(content)), opts, true)),
+      stat: (id) => t.files.stat(id),
+      read: (id) => t.files.read(id),
+      text: (id) => {
+        const b = t.files.read(id)
+        return b === null ? null : new TextDecoder().decode(b)
+      },
+      list: () => t.files.list(),
+    },
     close: () => t.raw.close(),
   }
 }
