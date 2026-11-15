@@ -35,6 +35,10 @@ describe('bundle', () => {
     expect(units['paid']).toMatchObject({ kind: 'onChange', table: 'orders', ops: ['update'], mode: 'action', batch: 100, internal: true })
     expect(units['nightly']).toMatchObject({ kind: 'schedule', cron: '0 3 * * *', every: '', mode: 'mutation' })
 
+    // The manifest carries each callable unit's access, the default included.
+    const access = Object.fromEntries(manifestOf(evaluateBundle(b.bundle)).map((u) => [u.name, u.access]))
+    expect(access).toMatchObject({ checkout: 'write', myOrders: 'read' })
+    expect(access['nightly']).toBeUndefined()
     expect(manifestOf(evaluateBundle(b.bundle)).find((u) => u.name === 'paid')).toEqual({
       name: 'paid', kind: 'onChange', internal: true, description: '', args: null, mode: 'action', table: 'orders', ops: ['update'], batch: 100,
     })
