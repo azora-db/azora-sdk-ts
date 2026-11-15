@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { AzoraError, connect, uploadToSignedUrl, type Database } from '../../src/index.ts'
+import { resumeUpload } from '../../src/storage.ts'
 import { engineBinary, startEngine, type Engine } from '../helpers/engine.ts'
 
 describe.skipIf(!engineBinary())('file storage', () => {
@@ -11,6 +12,7 @@ describe.skipIf(!engineBinary())('file storage', () => {
     engine = await startEngine({
       schema: ['CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, avatar FILE)', "INSERT INTO users(id, name) VALUES (1, 'ann')"],
       publish: [],
+      tokens: { writer: ['--sub', 'user:9', '--scope', 'read,write'], reader: ['--sub', 'user:8', '--scope', 'read'] },
     })
     db = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { apiKey: engine.apiKey })
   })
@@ -77,6 +79,25 @@ describe.skipIf(!engineBinary())('file storage', () => {
     expect(new Uint8Array(await (await fetch(url as string)).arrayBuffer())).toEqual(png)
   })
 
+  test('a client token signs an upload URL over the connection', async () => {
+    const app = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { token: engine.tokens['writer'] as string })
+    const reader = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { token: engine.tokens['reader'] as string })
+    try {
+      const grant = await app.signUploadUrl({ path: 'from-app/note.txt', maxSize: 64, allowedTypes: 'text/plain', ttlSeconds: 60 })
+      expect(grant.url).toContain('/storage/v1/u/shop')
+      expect(grant.sessionUrl).toContain('/storage/v1/s/shop')
+      expect(grant.expiresAt.getTime()).toBeGreaterThan(Date.now())
+      const obj = await uploadToSignedUrl(grant.url, 'from the app', { contentType: 'text/plain' })
+      expect(obj.path).toBe('from-app/note.txt')
+      await expect(uploadToSignedUrl(grant.url, 'x'.repeat(100), { contentType: 'text/plain' })).rejects.toBeInstanceOf(AzoraError)
+      // No write scope, no link.
+      await expect(reader.signUploadUrl()).rejects.toMatchObject({ code: 'permission_denied' })
+      await expect(app.signUploadUrl({ ttlSeconds: -1 })).rejects.toThrow(TypeError)
+    } finally {
+      await Promise.all([app.close(), reader.close()])
+    }
+  })
+
   test('a resumable upload survives a failing chunk', async () => {
     const bytes = new Uint8Array(1_000_000).map((_, i) => (i * 31) % 256)
     let patches = 0
@@ -95,6 +116,38 @@ describe.skipIf(!engineBinary())('file storage', () => {
     expect(progress.at(-1)).toBe(bytes.length)
     expect(progress).toEqual([...progress].sort((a, b) => a - b))
     await flakyDb.close()
+  })
+
+  test('an aborted resumable upload resumes from its stored session URL alone', async () => {
+    const bytes = new Uint8Array(1_000_000).map((_, i) => (i * 17 + 3) % 256)
+    const stop = new AbortController()
+    let stored = ''
+    let sentBefore = 0
+    const first = await db.storage
+      .uploadResumable(bytes, {
+        path: 'big/resumed.bin', chunkSize: 128 << 10, signal: stop.signal,
+        onSession: (url) => (stored = url),
+        onProgress: (sent) => {
+          sentBefore = sent
+          if (sent >= 2 * (128 << 10)) stop.abort()
+        },
+      })
+      .catch((e: unknown) => e)
+    expect(first).toBeInstanceOf(Error)
+    expect(stored).toContain('/storage/v1/s/shop/')
+    expect(sentBefore).toBe(2 * (128 << 10))
+
+    // A later process: only the URL and the same bytes, no client, no key.
+    const progress: number[] = []
+    await expect(resumeUpload(stored, bytes.subarray(0, 999_999))).rejects.toMatchObject({ code: 'invalid' })
+    const obj = await resumeUpload(stored, bytes, { chunkSize: 128 << 10, onProgress: (sent) => progress.push(sent) })
+    expect(progress[0]).toBe(sentBefore)
+    expect(progress.at(-1)).toBe(bytes.length)
+    expect(obj).toMatchObject({ path: 'big/resumed.bin', size: bytes.length })
+    expect(obj.sha256).toBe(createHash('sha256').update(bytes).digest('hex'))
+    expect(new Uint8Array(await (await db.storage.download(obj.id)).arrayBuffer())).toEqual(bytes)
+    // The session ended with its completion.
+    await expect(resumeUpload(stored, bytes)).rejects.toMatchObject({ code: 'not_found', status: 404 })
   })
 
   test('storage needs an API key and a storage URL', async () => {
