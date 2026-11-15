@@ -71,7 +71,13 @@ describe.skipIf(!engineBinary())('units', () => {
     expect(first).toMatchObject({ unchanged: false, dryRun: false })
     expect(first.version).toBeGreaterThan(0)
     const names = first.units.map((u) => u.name).sort()
-    expect(names).toEqual(['audit', 'bump', 'boom', 'cartReminder', 'checkout', 'echo', 'hasSecret', 'myOrders', 'orderPlaced', 'refuse', 'remindCart', 'stats', 'whoami'].sort())
+    expect(names).toEqual([
+      'audit', 'bump', 'boom', 'cartReminder', 'checkout', 'echo', 'hasSecret', 'myOrders', 'orderPlaced', 'refuse', 'remindCart', 'stats', 'whoami',
+      // ctx.storage
+      'avatarUpload', 'dropReport', 'findReport', 'putReport', 'putThenFail', 'queryPut', 'readDoc', 'readMissing', 'saveDoc',
+      // plain HTTP
+      'httpEcho', 'httpHook', 'httpSum',
+    ].sort())
     expect(first.units.find((u) => u.name === 'checkout')).toMatchObject({
       kind: 'mutation', internal: false, args: { type: 'object', properties: { cartId: { type: 'string', minLength: 1, maxLength: 64 } }, required: ['cartId'] },
     })
@@ -103,6 +109,11 @@ describe.skipIf(!engineBinary())('units', () => {
     expect(await db.queryOne('SELECT customer, status, total FROM orders WHERE id = ?', [orderId])).toEqual({ customer: 42, status: 'open', total: 20 })
     expect(await db.queryValue("SELECT count(*) FROM carts WHERE id = 'k42'")).toBe(0)
     await expect(customer.units.checkout({ cartId: 'k7' })).rejects.toMatchObject({ name: 'UnitError', code: 'permission_denied' })
+    // checkout declares access "any"; bump declares nothing, so a mutation
+    // needs the write scope, which the customer's token does not have.
+    await expect(customer.call('bump', { by: 1 })).rejects.toSatisfy((e) => isCode(e, 'permission_denied') && /needs the write scope/.test((e as Error).message))
+    expect((await db.unitsAdmin.list()).units.find((u) => u.name === 'checkout')?.access).toBe('any')
+    expect((await db.unitsAdmin.list()).units.find((u) => u.name === 'bump')?.access).toBe('write')
     await expect(customer.units.checkout({ cartId: 'k404' })).rejects.toMatchObject({ code: 'not_found', data: { cartId: 'k404' } })
     const mine = await customer.units.myOrders()
     expect(mine.length).toBeGreaterThan(0)
