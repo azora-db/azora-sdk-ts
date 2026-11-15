@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Write Azora DB units in TypeScript: query, mutation and action functions that run inside the database, and the azora-units CLI that publishes them",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "private": true,
   "sideEffects": false,
   "engines": {
