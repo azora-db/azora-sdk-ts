@@ -51,6 +51,28 @@ export interface ResumableUploadOptions extends UploadOptions {
   onProgress?: (sent: number, total: number) => void
   /** How many times a failed chunk is retried after asking the server for its offset (default 5). */
   retries?: number
+  /**
+   * Called once with the session's URL when the session is open, before
+   * the first chunk: store it to continue the upload in a later process
+   * or page load with `resumeUpload`. The URL is the only credential the
+   * chunks and the completion need, so keep it private. The session
+   * expires 24 hours (the server's `storage.upload_session_ttl`) after
+   * it was opened.
+   */
+  onSession?: (sessionUrl: string) => void
+}
+
+/** Options of `resumeUpload`. */
+export interface ResumeUploadOptions {
+  /** Bytes per request (default 8 MiB). */
+  chunkSize?: number
+  /** Called with the offset the server holds when the upload resumes, then after every chunk it stored. */
+  onProgress?: (sent: number, total: number) => void
+  /** How many times a failed chunk is retried after asking the server for its offset (default 5). */
+  retries?: number
+  signal?: AbortSignal
+  /** The fetch to use (default: the global one). */
+  fetch?: typeof fetch
 }
 
 export interface ListOptions {
@@ -223,14 +245,14 @@ export class Storage {
   /**
    * Uploads a large file in chunks through a resumable session: a chunk
    * that fails is retried from the offset the server reports, so a broken
-   * connection costs at most one chunk.
+   * connection costs at most one chunk. To continue after your own
+   * process or page ends, store the URL `onSession` reports and pass it
+   * to `resumeUpload` with the same content.
    */
   async uploadResumable(body: Blob | ArrayBuffer | ArrayBufferView, o: ResumableUploadOptions = {}): Promise<StoredObject> {
     const blob = body instanceof Blob ? body : new Blob([body as BlobPart])
-    const total = blob.size
-    const chunk = Math.max(64 << 10, o.chunkSize ?? 8 << 20)
     const sig = o.signal ? { signal: o.signal } : {}
-    const headers: Record<string, string> = { 'Upload-Length': String(total) }
+    const headers: Record<string, string> = { 'Upload-Length': String(blob.size) }
     const type = o.contentType ?? (body instanceof Blob ? body.type : '')
     if (type) headers['X-Azora-Content-Type'] = type
     if (o.sha256) headers['X-Azora-SHA256'] = o.sha256
@@ -239,29 +261,13 @@ export class Storage {
       { method: 'POST', headers, ...sig },
     )
     const location = open.headers.get('Location') ?? ((await open.json()) as { session: { url: string } }).session.url
-    let offset = 0
-    let failures = 0
-    while (offset < total) {
-      try {
-        const res = await this.request(
-          location,
-          { method: 'PATCH', headers: { 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' }, body: blob.slice(offset, offset + chunk), ...sig },
-          false,
-        )
-        offset = Number(res.headers.get('Upload-Offset') ?? offset + Math.min(chunk, total - offset))
-        failures = 0
-        o.onProgress?.(offset, total)
-      } catch (e) {
-        if (o.signal?.aborted || ++failures > (o.retries ?? 5)) throw e
-        if (e instanceof AzoraError && e.status !== undefined && e.status !== 409 && e.status < 500 && e.status !== 429) throw e
-        await new Promise((r) => setTimeout(r, Math.min(200 * 2 ** failures, 5000)))
-        // Ask where the session is: bytes received before the failure are kept.
-        const head = await this.request(location, { method: 'HEAD', ...sig }, false)
-        offset = Number(head.headers.get('Upload-Offset') ?? offset)
-      }
-    }
-    const done = await this.request(`${location}/complete`, { method: 'POST', ...sig }, false)
-    return toObject(((await done.json()) as { object: WireObject }).object)
+    o.onSession?.(location)
+    return sendToSession(this.fetchImpl ?? globalThis.fetch, location, blob, 0, o)
+  }
+
+  /** `resumeUpload`, reachable from the class: see the function of that name. */
+  static resumeUpload(sessionUrl: string, body: Blob | ArrayBuffer | ArrayBufferView, o: ResumeUploadOptions = {}): Promise<StoredObject> {
+    return resumeUpload(sessionUrl, body, o)
   }
 
   /**
@@ -349,6 +355,125 @@ export class Storage {
   publicUrl(id: string): string {
     return this.url(`p/${this.db}/${encodeURIComponent(id)}`)
   }
+}
+
+/**
+ * The URL that opens resumable upload sessions under the grant of a
+ * signed upload URL: the same query (the signature does not cover the
+ * path) under `/storage/v1/s/` instead of `/storage/v1/u/`. "" when the
+ * URL is not a signed upload URL.
+ */
+export function sessionUrlOf(signedUploadUrl: string): string {
+  const q = signedUploadUrl.indexOf('?')
+  const base = q < 0 ? signedUploadUrl : signedUploadUrl.slice(0, q)
+  const i = base.lastIndexOf('/storage/v1/u/')
+  if (i < 0 || q < 0) return ''
+  return base.slice(0, i) + '/storage/v1/s/' + base.slice(i + '/storage/v1/u/'.length) + signedUploadUrl.slice(q)
+}
+
+/** A session answers `not_found` once it expired, was completed or was aborted. */
+function sessionGone(e: unknown): unknown {
+  if (!(e instanceof AzoraError) || e.status !== 404) return e
+  return new AzoraError(
+    ErrorCode.NotFound,
+    'azora: storage: the upload session is gone: it expired, was completed or was aborted; start the upload again',
+    { status: 404 },
+  )
+}
+
+/**
+ * Sends the bytes of `blob` from `offset` on to an open session in
+ * chunks, then completes it. The session's URL authorises the requests:
+ * no credential is sent.
+ */
+async function sendToSession(
+  f: typeof fetch,
+  location: string,
+  blob: Blob,
+  offset: number,
+  o: { chunkSize?: number; onProgress?: (sent: number, total: number) => void; retries?: number; signal?: AbortSignal },
+): Promise<StoredObject> {
+  const total = blob.size
+  const chunk = Math.max(64 << 10, o.chunkSize ?? 8 << 20)
+  const sig = o.signal ? { signal: o.signal } : {}
+  const request = async (url: string, init: RequestInit): Promise<Response> => {
+    const res = await f(url, { ...init, ...sig })
+    if (!res.ok) throw await failure(res)
+    return res
+  }
+  let failures = 0
+  while (offset < total) {
+    try {
+      const res = await request(location, {
+        method: 'PATCH',
+        headers: { 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' },
+        body: blob.slice(offset, offset + chunk),
+      })
+      offset = Number(res.headers.get('Upload-Offset') ?? offset + Math.min(chunk, total - offset))
+      failures = 0
+      o.onProgress?.(offset, total)
+    } catch (e) {
+      if (o.signal?.aborted || ++failures > (o.retries ?? 5)) throw e
+      if (e instanceof AzoraError && e.status !== undefined && e.status !== 409 && e.status < 500 && e.status !== 429) throw sessionGone(e)
+      await new Promise((r) => setTimeout(r, Math.min(200 * 2 ** failures, 5000)))
+      // Ask where the session is: bytes received before the failure are kept.
+      const head = await request(location, { method: 'HEAD' })
+      offset = Number(head.headers.get('Upload-Offset') ?? offset)
+    }
+  }
+  if (offset > total) {
+    throw new AzoraError(ErrorCode.Invalid, `azora: storage: the session holds ${offset} bytes, more than the ${total} to upload`)
+  }
+  const done = await request(`${location}/complete`, { method: 'POST' }).catch((e: unknown) => {
+    throw sessionGone(e)
+  })
+  return toObject(((await done.json()) as { object: WireObject }).object)
+}
+
+/**
+ * Continues a resumable upload from its session URL (what `onSession` of
+ * `uploadResumable` reported), in another process or page load: it asks
+ * the server how many bytes it holds, uploads the rest of `body` in
+ * chunks and resolves to the stored object. `body` must be the same
+ * content the upload started with.
+ *
+ * Needs no credentials: the session URL carries the right to append to
+ * and complete the upload, so keep it private (do not log it or put it
+ * where other users can read it). A session expires 24 hours (the
+ * server's `storage.upload_session_ttl`) after it was opened, whatever
+ * its progress; one that expired, was completed or was aborted fails
+ * with a `not_found` error, a body whose length is not the one the
+ * session was opened with fails with `invalid` before a byte is sent.
+ */
+export async function resumeUpload(
+  sessionUrl: string,
+  body: Blob | ArrayBuffer | ArrayBufferView,
+  o: ResumeUploadOptions = {},
+): Promise<StoredObject> {
+  const f = o.fetch ?? globalThis.fetch
+  const blob = body instanceof Blob ? body : new Blob([body as BlobPart])
+  const total = blob.size
+  const head = await f(sessionUrl, { method: 'HEAD', ...(o.signal ? { signal: o.signal } : {}) })
+  if (!head.ok) throw sessionGone(await failure(head))
+  const offset = Number(head.headers.get('Upload-Offset') ?? 0)
+  const declared = Number(head.headers.get('Upload-Length') ?? 0)
+  if (!Number.isFinite(offset) || offset < 0) {
+    throw new AzoraError(ErrorCode.Internal, 'azora: storage: the server did not report the session\'s offset')
+  }
+  if (declared > 0 && declared !== total) {
+    throw new AzoraError(
+      ErrorCode.Invalid,
+      `azora: storage: the body is ${total} bytes but the session was opened for ${declared}: resume with the same content`,
+    )
+  }
+  if (offset > total) {
+    throw new AzoraError(
+      ErrorCode.Invalid,
+      `azora: storage: the session holds ${offset} bytes, more than the ${total} of the body: resume with the same content`,
+    )
+  }
+  o.onProgress?.(offset, total)
+  return sendToSession(f, sessionUrl, blob, offset, o)
 }
 
 /**
