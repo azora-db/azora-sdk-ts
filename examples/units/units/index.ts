@@ -41,6 +41,9 @@ export const myOrders = query({
  */
 export const checkout = mutation({
   description: 'Turns a cart into an open order.',
+  // A customer's token has only the read scope: `any` lets it call this
+  // mutation, and the handler decides whose cart it may check out.
+  access: 'any',
   args: { cartId: v.string({ min: 1, max: 64 }) },
   async handler(ctx, { cartId }) {
     const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
@@ -60,6 +63,7 @@ export const checkout = mutation({
  */
 export const remindCart = mutation({
   description: 'Schedules a reminder for a cart in `minutes` (default: a day).',
+  access: 'any', // customers too; the handler checks the cart is theirs
   args: { cartId: v.string({ min: 1, max: 64 }), minutes: v.optional(v.number({ min: 0, max: 7 * 24 * 60 })) },
   handler(ctx, { cartId, minutes }) {
     const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
