@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Files, HTTP
+
+- `ctx.storage` (`StorageReader` in queries, `Storage` in mutations and
+  actions): `stat`, `statPath`, `read`, `text`, `url`, `upload`, `put`,
+  `delete`, `uploadUrl`. Types `StoredFile`, `FileOptions`, `FileUpload`,
+  `UploadGrant`; a `FileUpload` is a statement argument (`SqlArg`).
+- `http: true | 'public'` on `query`, `mutation` and `action`: the unit
+  answers plain HTTP requests at `/units/v1/<database>/<unit>`.
+  `ctx.request` (`HttpRequest`) is the request, `httpResponse(body, {
+  status, headers })` shapes the answer, and `ctx.auth.kind` can be
+  `'public'`.
+- `@azora-db/units/testing`: `t.request(name, init)` sends an HTTP
+  request to a unit, and `t.storage` seeds and reads the files
+  `ctx.storage` sees. Both follow the engine, checked against it.
+- `azora-units list` marks units that answer HTTP.
+
+### Build
+
+- `azora-units build [dir] --out <file>` writes the bundle to a file
+  (and `<file>.map`) without connecting: the same bytes `publish` sends,
+  for the engine's `azora units deploy`, the admin API, or a CI artifact.
+
+### Access
+
+- `query`, `mutation` and `action` take `access: 'any' | 'read' | 'write'`
+  (`UnitAccess`): the scope a credential needs to call the unit. The
+  engine now checks it. The default is `read` for a query and `write` for
+  a mutation or an action, so **a read-only token can no longer call a
+  mutation or an action unless the unit declares `access: 'any'`**; such
+  a unit decides from `ctx.auth` what its caller may do.
+- The local test environment (`@azora-db/units/testing`) checks access
+  the same way; `azora-units list` marks units any credential may call.
+
 ### Jobs
 
 - `ctx.scheduler` on `MutationCtx` and `ActionCtx` (not queries):
