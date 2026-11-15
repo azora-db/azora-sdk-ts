@@ -36,6 +36,8 @@ export interface EngineOptions {
   publish?: string[]
   /** Extra realtime settings (JSON values). */
   realtime?: Record<string, unknown>
+  /** Settings of the server section (JSON values). */
+  server?: Record<string, unknown>
   /** Client tokens to mint: name -> arguments of `azora realtime token create shop`. */
   tokens?: Record<string, string[]>
 }
@@ -86,6 +88,7 @@ export async function startEngine(o: EngineOptions = {}): Promise<Engine> {
       data_root: join(dir, 'root'),
       realtime: { allow_plaintext: true, ...o.realtime },
       storage: { cors_origins: '*' },
+      ...(o.server ? { server: o.server } : {}),
     }),
   )
   const cli = (...args: string[]): string =>
