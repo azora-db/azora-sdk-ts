@@ -10,7 +10,7 @@ export const DEFAULT_RECONNECT_MAX_MS = 30_000
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 export const DEFAULT_CLIENT_NAME = 'azora-js/0.1'
 
-/** Returns a credential: an API key (`azk_…`) or a client token (`azt1.…`). */
+/** Returns a credential: an API key (`azk_…`), a client token (`azt1.…`) or an identity provider's JWT. */
 export type CredentialProvider = () => string | Promise<string>
 
 /** Options of {@link connect}. */
@@ -50,8 +50,9 @@ export interface ConnectOptions {
   allowPlaintext?: boolean
 
   /**
-   * Who the client is: an API key (`azk_…`) or a client token (`azt1.…`),
-   * or a function returning one. Keep it private. The function runs on
+   * Who the client is: an API key (`azk_…`), a client token (`azt1.…`) or
+   * a JSON Web Token of an identity provider the database accepts, or a
+   * function returning one. Keep it private. The function runs on
    * every (re)connect and whenever the server reports that the credential
    * expired.
    */
