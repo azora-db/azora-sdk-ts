@@ -36,7 +36,7 @@ describe('requests', () => {
     const s = new FakeServer()
     s.onMessage = echo
     const db = await client(s, { clientName: 'my-app/2' })
-    expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, version: 1, database: 'shop', credential: 'k', client: 'my-app/2' })
+    expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, version: 1, database: 'shop', credential: 'k', client: 'my-app/2 +tx' })
     expect(await db.queryValue('SELECT 1')).toBe('SELECT 1')
     expect(db.session).toMatchObject({ mode: 'plaintext', principal: 'test', serverKey: '' })
   })
