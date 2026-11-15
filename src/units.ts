@@ -143,6 +143,14 @@ export interface UnitInfo {
   name: string
   kind: UnitKind
   internal: boolean
+  /**
+   * The scope a credential needs to call it: `read`, `write` or `any`
+   * (every credential). Absent on schedule and onChange units, and on
+   * servers that do not check it.
+   */
+  access?: 'any' | 'read' | 'write'
+  /** How it answers plain HTTP requests at `/units/v1/<database>/<unit>`: with a credential, or without; absent when it does not. */
+  http?: 'auth' | 'public'
   description: string
   /** The JSON Schema of the arguments, or null for any. */
   args: JsonSchema | null
