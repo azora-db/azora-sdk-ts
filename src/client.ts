@@ -7,7 +7,7 @@
 import type { ResolvedOptions } from './config.ts'
 import type { Discovery } from './discovery.ts'
 import {
-  AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, isPermanent, LostError, TimeoutError, UnknownOutcomeError,
+  AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, isPermanent, LostError, TimeoutError, TxExpiredError, UnknownOutcomeError,
 } from './errors.ts'
 import { MsgType, type ErrorMsg, type Msg, type Result, type Returned, type Shape, type Signed } from './messages.ts'
 import { dial, type Link, type Session } from './session.ts'
@@ -21,6 +21,22 @@ interface CallPolicy {
   once?: boolean
   /** An unauthenticated answer is final (Auth itself). */
   noRefresh?: boolean
+  /**
+   * Use this link only (a statement of an interactive transaction): when
+   * it is lost the call rejects with a TxExpiredError instead of moving to
+   * a new connection.
+   */
+  link?: Link
+}
+
+/** @internal An interactive transaction the server opened, and the link it lives on. */
+export interface TxHandle {
+  link: Link
+  txId: number
+  /** The server's idle lease, in ms. */
+  idleMs: number
+  /** Frees the client's transaction slot; call it once the transaction has ended. */
+  release: () => void
 }
 
 /** UnitAdmin operations that only read: safe to send again after a lost connection. */
@@ -32,6 +48,7 @@ interface ShapeInfo {
 }
 
 function toError(e: ErrorMsg): AzoraError {
+  if (e.code === ErrorCode.TxExpired) return new TxExpiredError(e.message)
   return new AzoraError(e.code, e.message, { fatal: e.fatal, retryAfterMs: e.retryAfterMs })
 }
 
@@ -57,6 +74,9 @@ export class Client {
   private authLock: Promise<unknown> = Promise.resolve()
   private following: Link | null = null // the link the supervisor waits on
   private supervisor: Promise<void> = Promise.resolve()
+  private txLock: Promise<void> = Promise.resolve() // a session holds one interactive transaction at a time
+  /** Interactive transactions open or waiting on this client. */
+  txQueue = 0
 
   constructor(o: ResolvedOptions, discovery: Discovery | null = null) {
     this.o = o
@@ -277,22 +297,24 @@ export class Client {
   /**
    * Sends a request built by build (given its request id) until it gets an
    * answer: through reconnects, rate limits and credential refreshes.
+   * build also gets the link the request goes out on.
    */
-  async call(build: (id: number) => Msg, policy: CallPolicy = {}, opts?: CallOptions): Promise<Msg> {
+  async call(build: (id: number, link: Link) => Msg, policy: CallPolicy = {}, opts?: CallOptions): Promise<Msg> {
     const sc = this.scope(opts)
     try {
       let refreshed = 0
       let unavailable = 0
       for (;;) {
-        const link = await this.waitLink(sc.signal, true)
+        const link = policy.link ?? (await this.waitLink(sc.signal, true))
         const gen = link.authGen
         const id = this.nextReqId()
         let m: Msg
         try {
-          m = await link.roundTrip(id, build(id), sc.signal)
+          m = await link.roundTrip(id, build(id, link), sc.signal)
         } catch (e) {
           if (e instanceof LostError) {
             if (policy.once && e.sent) throw new UnknownOutcomeError()
+            if (policy.link) throw new TxExpiredError(`the connection that held the transaction was lost (${e.message}); the server rolled it back`)
             this.stats.retries++
             continue
           }
@@ -452,8 +474,85 @@ export class Client {
     return m
   }
 
+  /**
+   * Opens an interactive transaction: waits for this client's transaction
+   * slot, then for the server's TxBegun. The transaction lives on the
+   * returned link only. A TxBegin lost with its connection is safe to send
+   * again: the server rolls back what a closed session held.
+   */
+  async txBegin(opts?: CallOptions): Promise<TxHandle> {
+    const prev = this.txLock
+    let free: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      free = resolve
+    })
+    this.txLock = prev.then(() => held)
+    this.txQueue++
+    let released = false
+    const release = (): void => {
+      if (released) return
+      released = true
+      this.txQueue--
+      free()
+    }
+    const sc = this.scope(opts)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        if (sc.signal.aborted) return reject(sc.signal.reason as Error)
+        const onAbort = (): void => reject(sc.signal.reason as Error)
+        sc.signal.addEventListener('abort', onAbort, { once: true })
+        void prev.then(() => {
+          sc.signal.removeEventListener('abort', onAbort)
+          resolve()
+        })
+      })
+      let on: Link | undefined
+      const m = await this.call(
+        (id, link) => {
+          if (link.info.txIdleMs === 0) {
+            throw new AzoraError(ErrorCode.Unavailable, 'this server does not support interactive transactions (its Welcome carries no transaction lease: the engine is older, or realtime.tx_idle_timeout is 0); use db.batch')
+          }
+          on = link
+          return { type: MsgType.TxBegin, reqId: id }
+        },
+        {},
+        opts,
+      )
+      if (m.type !== MsgType.TxBegun || !on) throw new Error(`azora: unexpected answer type ${m.type}`)
+      return { link: on, txId: m.txId, idleMs: m.idleMs, release }
+    } catch (e) {
+      release()
+      throw this.finalError(e)
+    } finally {
+      sc.done()
+    }
+  }
+
+  /** Runs one statement of an interactive transaction, on its link. */
+  async txStmt(h: TxHandle, sql: string, args: Value[] | null, query: boolean, opts?: CallOptions): Promise<Result> {
+    const m = await this.call((id) => ({ type: MsgType.TxStmt, reqId: id, txId: h.txId, sql, args, query }), { link: h.link }, opts)
+    if (m.type !== MsgType.Result) throw new Error(`azora: unexpected answer type ${m.type}`)
+    return m
+  }
+
+  /**
+   * Commits or rolls back an interactive transaction. A commit is not sent
+   * again once written: losing the connection then is an
+   * UnknownOutcomeError.
+   */
+  async txEnd(h: TxHandle, commit: boolean, mutation: string, opts?: CallOptions): Promise<void> {
+    const m = await this.call((id) => ({ type: MsgType.TxEnd, reqId: id, txId: h.txId, commit, mutation }), { link: h.link, once: commit }, opts)
+    if (m.type !== (commit ? MsgType.Result : MsgType.OK)) throw new Error(`azora: unexpected answer type ${m.type}`)
+  }
+
   async sign(objectId: string, ttlSeconds: number, opts?: CallOptions): Promise<Signed> {
     const m = await this.call((id) => ({ type: MsgType.Sign, reqId: id, objectId, ttlSeconds }), {}, opts)
+    if (m.type !== MsgType.Signed) throw new Error(`azora: unexpected answer type ${m.type}`)
+    return m
+  }
+
+  async signUpload(grant: string, ttlSeconds: number, opts?: CallOptions): Promise<Signed> {
+    const m = await this.call((id) => ({ type: MsgType.SignUpload, reqId: id, grant, ttlSeconds }), {}, opts)
     if (m.type !== MsgType.Signed) throw new Error(`azora: unexpected answer type ${m.type}`)
     return m
   }
