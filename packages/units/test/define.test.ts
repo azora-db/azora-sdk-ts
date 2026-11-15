@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, test } from 'vitest'
 import {
-  action, isUnitDefinition, isUnitName, mutation, onChange, query, schedule, UnitError, v, type JobInfo, type MutationCtx, type QueryCtx, type UnitBrand,
+  action, isUnitDefinition, isUnitName, mutation, onChange, query, schedule, UnitError, v, type JobInfo, type MutationCtx, type QueryCtx, type UnitBrand, httpResponse,
 } from '../src/index.ts'
 
 type BrandOf<T> = T extends { readonly '~azora'?: infer B } ? Exclude<B, undefined> : never
@@ -14,6 +14,19 @@ describe('definitions', () => {
       args: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'], additionalProperties: false },
     })
     expect(action({ args: v.string(), handler })).toMatchObject({ '~azora': 1, kind: 'action', args: { type: 'string' }, internal: false })
+    // access is in the definition only when declared: the engine applies the default.
+    expect(mutation({ access: 'any', handler })).toMatchObject({ kind: 'mutation', access: 'any' })
+    expect(query({ access: 'write', handler })).toMatchObject({ access: 'write' })
+    expect(() => mutation({ access: 'admin' as never, handler })).toThrow('access must be "any", "read" or "write"')
+    // http is in the definition only when the unit answers HTTP.
+    expect(query({ http: true, handler })).toMatchObject({ http: true })
+    expect(mutation({ http: 'public', handler })).toMatchObject({ http: 'public' })
+    expect(query({ http: false, handler })).not.toHaveProperty('http')
+    expect(() => query({ http: 'yes' as never, handler })).toThrow('http must be true or "public"')
+    expect(() => query({ http: true, internal: true, handler })).toThrow('an internal unit cannot be called over HTTP')
+    expect(httpResponse('hi', { status: 201, headers: { 'X-A': 'b' } })).toEqual({ '~http': 1, status: 201, headers: { 'X-A': 'b' }, body: 'hi' })
+    expect(httpResponse()).toEqual({ '~http': 1, status: 200, headers: {}, body: null })
+    expect(() => httpResponse('x', { status: 99 })).toThrow('status must be an integer from 200 to 599')
     expect(schedule({ cron: '0 3 * * *', handler })).toEqual({
       '~azora': 1, kind: 'schedule', handler, args: null, internal: true, description: '', mode: 'mutation', cron: '0 3 * * *', every: '',
     })
