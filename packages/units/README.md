@@ -65,9 +65,22 @@ exports are ignored.
 | `onChange({ table, ops?, batch?, mode?, handler })` | with the rows that changed in a table | | with `mode: 'action'` |
 
 `query`, `mutation` and `action` also take `internal: true` (clients cannot
-call it; other units can, with `ctx.run`) and `description` (shown in the
-dashboard and to AI agents). `schedule` and `onChange` units are always
-internal.
+call it; other units can, with `ctx.run`), `access` and `description`
+(shown in the dashboard and to AI agents). `schedule` and `onChange` units
+are always internal.
+
+`access` is the scope a credential needs to call the unit: `'read'` (the
+default for a query), `'write'` (the default for a mutation or an action)
+or `'any'`. With `'any'` every credential may call it, a read-only client
+token included, so the handler must check `ctx.auth` itself:
+
+```ts
+export const checkout = mutation({
+  access: 'any', // customers hold read-only tokens
+  args: { cartId: v.string() },
+  handler(ctx, { cartId }) { /* is this cart ctx.auth.subject's? */ },
+})
+```
 
 ```ts
 export const nightly = schedule({ cron: '0 3 * * *', handler: (ctx) => { /* ... */ } })
@@ -144,10 +157,53 @@ ctx.scheduler.after(ms, unit, args?)       // mutations and actions: run a unit 
 ctx.scheduler.at(dateOrUnixMs, unit, args?)
 ctx.scheduler.cancel(id)                   // true if a waiting job was removed
 ctx.unit                     // { name, kind, trigger, mutationId, deploy, job }
+ctx.storage                  // stored files (below)
+ctx.request                  // the HTTP request when called over plain HTTP, else null (below)
 ```
 
-`ctx.unit.trigger` says what started the run: `call` (a client),
-`schedule`, `change` (onChange), `job`, `admin` (the admin API and the
+**Files.** `ctx.storage` reads and writes the database's stored files. A
+file a mutation stores or deletes is part of its transaction.
+
+```ts
+const f = ctx.storage.stat(id)                 // { id, bucket, path, name, contentType, size, sha256, metadata, createdAt } | null
+ctx.storage.statPath('invoices/7.pdf')         // by path (second argument: the bucket)
+ctx.storage.read(id); ctx.storage.text(id)     // Uint8Array, or UTF-8 text
+ctx.storage.url(id, { ttl: 300, download: 'invoice.pdf' })   // a signed download link
+// mutations and actions:
+ctx.db.exec('UPDATE users SET avatar = ? WHERE id = ?', ctx.storage.upload(bytes, { name: 'a.png' }), id)
+ctx.storage.put('report text', { path: 'reports/q3.txt' })   // a file on its own, kept until deleted
+ctx.storage.delete(id, { force: true })                       // false when there was none
+ctx.storage.uploadUrl({ bucket: 'avatars', max_size: 2 << 20 }, { ttl: 300 })   // { url, expiresAt }: lets the caller upload
+```
+
+`upload` returns a value for one statement argument: the file is stored in
+that statement's transaction and the argument becomes its id.
+
+**HTTP.** A unit that declares `http` also answers plain HTTP requests at
+`/units/v1/<database>/<unit>`. With `http: true` the request needs a
+credential (`Authorization: Bearer`), checked like any call; with `http:
+'public'` it needs none, and the unit checks its caller, as a webhook does:
+
+```ts
+import { httpResponse, mutation, UnitError } from '@azora-db/units'
+
+export const stripeWebhook = mutation({
+  http: 'public',
+  handler(ctx, event: { type: string }) {
+    const r = ctx.request! // { method, path, query, headers, body, bytes, ip }
+    const want = ctx.crypto.hmac(ctx.env['STRIPE_SECRET'] ?? '', r.body)
+    if (!ctx.crypto.timingSafeEqual(want, r.headers['x-signature'] ?? '')) throw new UnitError('permission_denied', 'bad signature')
+    ctx.db.exec('INSERT INTO events(type) VALUES (?)', event.type)
+    return httpResponse('ok', { status: 200 })   // or return data: sent as JSON with status 200
+  },
+})
+```
+
+A JSON body is the unit's arguments (without a body, the query
+parameters are). A thrown `UnitError` becomes 400, 403, 404, 409 or 500.
+
+`ctx.unit.trigger` says what started the run: `call` (a client), `http`
+(a plain HTTP request), `schedule`, `change` (onChange), `job`, `admin` (the admin API and the
 dashboard), `cli` (`azora-units call`, `db.unitsAdmin.call`) or `mcp` (an
 AI agent). `ctx.unit.job` is `{ id, attempt, scheduledAt, scheduledBy,
 source }` in a job run and `null` otherwise.
@@ -255,6 +311,8 @@ test('checkout', async () => {
 | `t.jobs({ state?, unit? })`, `t.runJobs()`, `t.advance(ms)`, `t.now()` | jobs, as `azora-units jobs` shows them; run the due ones; move the clock, running each job when it falls due (retries included) |
 | `t.cancelJob(id)`, `t.retryJob(id)` | as `azora-units jobs cancel` / `retry` |
 | `t.runSchedule(name)`, `t.change(name, changes, { gap? })` | run a schedule, or an onChange unit with `[{ op, new?, old?, key? }]` (`key` defaults to the row's primary key) |
+| `t.request(name, { method?, path?, query?, headers?, body?, auth?, ip? })` | an HTTP request to a unit that declares `http`, answered as the server answers it: `{ status, headers, body, bytes, json() }`. Without `auth` the request has no credential |
+| `t.storage.put/stat/read/text/list` | the files `ctx.storage` sees: seed them before a call, look at them after |
 | `t.runs({ unit?, status? })`, `t.logs({ unit? })` | the run log (oldest first, with `rejected` runs) and the `ctx.log` lines |
 | `t.close()` | closes the database |
 
@@ -263,7 +321,8 @@ action transactions (a query cannot write, a mutation rolls back when it
 throws, an action commits each write on its own and groups them with
 `ctx.db.tx`); `ctx.run` and its rules (what may run what, 8 deep, the same
 transaction for a query or mutation run from a mutation, arguments
-checked); internal units refused to clients; argument schemas with the
+checked); internal units refused to clients, and credentials without the
+unit's `access` scope; argument schemas with the
 engine's subset and messages; the SQL check (one statement per call, no
 `BEGIN`/`COMMIT`/`PRAGMA`/`ATTACH`/`VACUUM`, no `azora_units*` tables);
 values (integers as numbers, `bigint` beyond 2^53, blobs as `Uint8Array`,
@@ -274,9 +333,19 @@ bytes, `ctx.crypto`, `ctx.unit`; jobs (written in the mutation's
 transaction, the target and arguments checked, run as `job:<id>` with
 `ctx.unit.job`, exactly once for mutations, retried after 1s, 2s, 4s ...
 and failed after `jobAttempts`); the per-call statement, row, value-size,
-job and fetch limits; the run log with its statuses and triggers.
+job and fetch limits; the run log with its statuses and triggers;
+`ctx.storage` (files kept in the test database, so they follow the
+transaction: stored with a mutation, gone when it throws); units over
+HTTP (`t.request`: arguments from the body or the query, `ctx.request`,
+credentials, statuses, `httpResponse`, `Idempotency-Key`).
 
 **What differs from the engine:**
+
+- Files: the local store does not apply a bucket's size limits or allowed
+  types, does not count the references of file columns (`delete` always
+  goes through, and a file is not removed when its last row is), takes
+  the content type from the name's extension only, and its signed links
+  point nowhere.
 
 - Code runs in Node's V8, not the engine's goja interpreter. Timeouts
   (`units.timeout`, `units.action_timeout`) are not enforced, nor is
@@ -318,6 +387,7 @@ file; the environment wins). Every command needs an API key with the
 |---|---|
 | `publish [dir] [--dry-run] [--note text]` | bundles `dir` (default `units`) and publishes it as a new version; the same bundle twice makes no new version; `--dry-run` checks it on the server |
 | `dev [dir]` | publishes, then publishes again on every save (debounced) |
+| `build [dir] --out <file>` | writes the bundle to a file and its source map to `<file>.map`, without a server: an artifact for `azora units deploy <database> <file>` (the engine's own CLI) or the admin API |
 | `list` | the active version's units |
 | `history [--limit n]` | the deploy history |
 | `rollback <version>` | makes an earlier version active again |
