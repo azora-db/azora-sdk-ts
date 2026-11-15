@@ -65,11 +65,11 @@ export interface LiveQueryState<T> {
  */
 export function useLiveQuery<T = Row>(table: string, options: LiveOptions<T> & { enabled?: boolean } = {}): LiveQueryState<T> {
   const db = useAzora()
-  const { enabled = true, map, orderBy, ...rest } = options
+  const { enabled = true, map, orderBy, onVerify, ...rest } = options
   // Functions cannot be compared by value: keep the latest in a ref.
-  const fns = useRef({ map, orderBy })
-  fns.current = { map, orderBy }
-  const key = JSON.stringify([table, rest.where ?? null, rest.key ?? null, typeof orderBy === 'function' ? 'fn' : (orderBy ?? null)], (_k, v: unknown) =>
+  const fns = useRef({ map, orderBy, onVerify })
+  fns.current = { map, orderBy, onVerify }
+  const key = JSON.stringify([table, rest.where ?? null, rest.key ?? null, typeof orderBy === 'function' ? 'fn' : (orderBy ?? null), rest.verifyEvery ?? 0], (_k, v: unknown) =>
     typeof v === 'bigint' ? `${v}n` : v instanceof Uint8Array ? Array.from(v) : v,
   )
   const [live, setLive] = useState<LiveQuery<T> | null>(null)
@@ -84,6 +84,7 @@ export function useLiveQuery<T = Row>(table: string, options: LiveOptions<T> & {
     const { map: m, orderBy: ob } = fns.current
     if (m) o.map = (row) => (fns.current.map ?? m)(row)
     if (ob !== undefined) o.orderBy = ob
+    if (rest.verifyEvery) o.onVerify = (res) => fns.current.onVerify?.(res)
     db.live<T>(table, o).then(
       (l) => {
         if (cancelled) return void l.close()
