@@ -7,6 +7,13 @@ import { CodecError, Reader, Writer, type Value } from './codec.ts'
 
 export const PROTOCOL_VERSION = 1
 
+/**
+ * The word a client adds to Hello.client (space-separated, after its name)
+ * to say it reads Welcome.txIdleMs: a message cannot grow for a peer that
+ * does not know the new field.
+ */
+export const CLIENT_TX = '+tx'
+
 export const MsgType = {
   Hello: 1,
   Welcome: 2,
@@ -35,6 +42,11 @@ export const MsgType = {
   Returned: 25,
   UnitAdmin: 26,
   UnitAdminResult: 27,
+  SignUpload: 28,
+  TxBegin: 29,
+  TxBegun: 30,
+  TxStmt: 31,
+  TxEnd: 32,
 } as const
 
 /** Subscription kinds on the wire. */
@@ -84,6 +96,12 @@ export interface Welcome {
   principal: string
   scopes: string[]
   maxSubscriptions: number
+  /**
+   * The idle lease of interactive transactions, in ms. A trailing field,
+   * on the wire only when non-zero and only for clients whose Hello
+   * announced {@link CLIENT_TX}; 0 or absent: no interactive transactions.
+   */
+  txIdleMs?: number
 }
 export interface ErrorMsg { type: typeof MsgType.Error; reqId: number; code: string; message: string; fatal: boolean; retryAfterMs: number }
 export interface Ping { type: typeof MsgType.Ping; nonce: number }
@@ -135,6 +153,8 @@ export interface Result {
 export interface Verify { type: typeof MsgType.Verify; reqId: number; subId: number }
 export interface Verified { type: typeof MsgType.Verified; reqId: number; subId: number; epoch: bigint; checkpoint: number; rows: number; sum: bigint }
 export interface Sign { type: typeof MsgType.Sign; reqId: number; objectId: string; ttlSeconds: number }
+/** Asks for a signed upload URL (answered with Signed); grant is the grant as JSON, "" for none. */
+export interface SignUpload { type: typeof MsgType.SignUpload; reqId: number; grant: string; ttlSeconds: number }
 export interface Signed { type: typeof MsgType.Signed; reqId: number; url: string; expiresAtMs: number }
 export interface GoAway { type: typeof MsgType.GoAway; reason: string; retryAfterMs: number }
 export interface Shape { type: typeof MsgType.Shape; table: string; tv: number; columns: string[]; pk: string[] }
@@ -157,10 +177,19 @@ export interface UnitAdmin { type: typeof MsgType.UnitAdmin; reqId: number; op: 
 /** Answers UnitAdmin with the JSON text of its result. */
 export interface UnitAdminResult { type: typeof MsgType.UnitAdminResult; reqId: number; body: string }
 
+/** Opens an interactive transaction (answered with TxBegun). */
+export interface TxBegin { type: typeof MsgType.TxBegin; reqId: number }
+/** Answers TxBegin: txId names the transaction; the server rolls it back after idleMs without a request. */
+export interface TxBegun { type: typeof MsgType.TxBegun; reqId: number; txId: number; idleMs: number }
+/** One statement of an interactive transaction: a read (query) or a write (answered with Result). */
+export interface TxStmt { type: typeof MsgType.TxStmt; reqId: number; txId: number; sql: string; args: Value[] | null; query: boolean }
+/** Commits (answered with Result) or rolls back (answered with OK) an interactive transaction. */
+export interface TxEnd { type: typeof MsgType.TxEnd; reqId: number; txId: number; commit: boolean; mutation: string }
+
 export type Msg =
   | Hello | Welcome | ErrorMsg | Ping | Pong | Auth | Subscribe | Subscribed | Unsubscribe | Batch | SubEnd | Ack
   | Query | Exec | Tx | Result | Verify | Verified | Sign | Signed | GoAway | Shape | OK
-  | Call | Returned | UnitAdmin | UnitAdminResult
+  | Call | Returned | UnitAdmin | UnitAdminResult | SignUpload | TxBegin | TxBegun | TxStmt | TxEnd
 
 function writeFilter(w: Writer, f: WireFilter | null): void {
   if (!f) return w.flag(false)
@@ -197,6 +226,7 @@ export function encode(m: Msg, w = new Writer(128)): Uint8Array {
     case MsgType.Welcome:
       w.s(m.sessionId); w.i(m.serverTimeMs); w.u(m.heartbeatMs); w.u(m.maxMessage); w.s(m.principal); w.strs(m.scopes)
       w.u(m.maxSubscriptions)
+      if (m.txIdleMs) w.u(m.txIdleMs)
       break
     case MsgType.Error:
       w.u(m.reqId); w.s(m.code); w.s(m.message); w.flag(m.fatal); w.u(m.retryAfterMs)
@@ -253,6 +283,9 @@ export function encode(m: Msg, w = new Writer(128)): Uint8Array {
     case MsgType.Sign:
       w.u(m.reqId); w.s(m.objectId); w.u(m.ttlSeconds)
       break
+    case MsgType.SignUpload:
+      w.u(m.reqId); w.s(m.grant); w.u(m.ttlSeconds)
+      break
     case MsgType.Signed:
       w.u(m.reqId); w.s(m.url); w.i(m.expiresAtMs)
       break
@@ -277,6 +310,18 @@ export function encode(m: Msg, w = new Writer(128)): Uint8Array {
     case MsgType.UnitAdminResult:
       w.u(m.reqId); w.s(m.body)
       break
+    case MsgType.TxBegin:
+      w.u(m.reqId)
+      break
+    case MsgType.TxBegun:
+      w.u(m.reqId); w.u(m.txId); w.u(m.idleMs)
+      break
+    case MsgType.TxStmt:
+      w.u(m.reqId); w.u(m.txId); w.s(m.sql); w.vals(m.args); w.flag(m.query)
+      break
+    case MsgType.TxEnd:
+      w.u(m.reqId); w.u(m.txId); w.flag(m.commit); w.s(m.mutation)
+      break
   }
   return w.finish()
 }
@@ -284,6 +329,13 @@ export function encode(m: Msg, w = new Writer(128)): Uint8Array {
 function byteField(r: Reader, what: string): number {
   const v = r.u()
   if (v > 255) throw new CodecError(`${what} ${v}`)
+  return v
+}
+
+/** Welcome's trailing field: never sent as 0. */
+function txIdle(r: Reader): number {
+  const v = r.u32()
+  if (v === 0) throw new CodecError('tx idle 0 is not sent')
   return v
 }
 
@@ -297,7 +349,7 @@ function readBody(type: number, r: Reader): Msg {
     case MsgType.Welcome:
       return {
         type, sessionId: r.s(), serverTimeMs: r.iNum(), heartbeatMs: r.u32(), maxMessage: r.u32(), principal: r.s(),
-        scopes: r.strs(), maxSubscriptions: r.u32(),
+        scopes: r.strs(), maxSubscriptions: r.u32(), txIdleMs: r.remaining > 0 ? txIdle(r) : 0,
       }
     case MsgType.Error:
       return { type, reqId: r.u32(), code: r.s(), message: r.s(), fatal: r.flag(), retryAfterMs: r.u32() }
@@ -369,6 +421,8 @@ function readBody(type: number, r: Reader): Msg {
       return { type, reqId: r.u32(), subId: r.u32(), epoch: r.iBig(), checkpoint: r.u(), rows: r.iNum(), sum: r.uBig() }
     case MsgType.Sign:
       return { type, reqId: r.u32(), objectId: r.s(), ttlSeconds: r.u32() }
+    case MsgType.SignUpload:
+      return { type, reqId: r.u32(), grant: r.s(), ttlSeconds: r.u32() }
     case MsgType.Signed:
       return { type, reqId: r.u32(), url: r.s(), expiresAtMs: r.iNum() }
     case MsgType.GoAway:
@@ -387,6 +441,14 @@ function readBody(type: number, r: Reader): Msg {
       return { type, reqId: r.u32(), op: r.s(), body: r.s() }
     case MsgType.UnitAdminResult:
       return { type, reqId: r.u32(), body: r.s() }
+    case MsgType.TxBegin:
+      return { type, reqId: r.u32() }
+    case MsgType.TxBegun:
+      return { type, reqId: r.u32(), txId: r.u(), idleMs: r.u32() }
+    case MsgType.TxStmt:
+      return { type, reqId: r.u32(), txId: r.u(), sql: r.s(), args: r.vals(), query: r.flag() }
+    case MsgType.TxEnd:
+      return { type, reqId: r.u32(), txId: r.u(), commit: r.flag(), mutation: r.s() }
   }
   throw new CodecError(`unknown type ${type}`)
 }
