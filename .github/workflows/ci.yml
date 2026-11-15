@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sdk
+      # The integration tests run against a real engine. ENGINE_REPO_TOKEN
+      # is only needed while the engine repository is private.
+      - uses: actions/checkout@v4
+        with:
+          repository: azora-db/azora-engine
+          path: azora-engine
+          token: ${{ secrets.ENGINE_REPO_TOKEN || github.token }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: azora-engine/go.mod
+          cache-dependency-path: azora-engine/go.sum
+      - name: Build the engine
+        run: make -C azora-engine build
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+      - name: Install
+        working-directory: sdk
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        working-directory: sdk
+        run: pnpm typecheck
+      - name: Build
+        working-directory: sdk
+        run: pnpm build
+      - name: Test
+        working-directory: sdk
+        env:
+          AZORA_BIN: ${{ github.workspace }}/azora-engine/bin/azora
+        run: pnpm test
