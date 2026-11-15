@@ -8,6 +8,7 @@ export { connect, connectEnv, Database, type BatchStatement, type QueryOptions, 
 export { parseUrl, decodeServerKey, encodeServerKey, type ConnectOptions, type CredentialProvider } from './config.ts'
 export { fingerprint, keyId } from './channel.ts'
 export type { Session } from './session.ts'
+export type { Transaction, TxOptions } from './tx.ts'
 export { Subscription, rowObject } from './subscription.ts'
 export { LiveQuery, compareValues, type LiveChange, type LiveEvent, type LiveOptions } from './live.ts'
 export { Replica, rowHash, keyString } from './replica.ts'
@@ -16,11 +17,12 @@ export {
 } from './filter.ts'
 export { sql, SqlStatement } from './sql.ts'
 export {
-  Storage, uploadToSignedUrl, type ListOptions, type ResumableUploadOptions, type SignOptions, type StoredObject, type UploadBody,
+  resumeUpload, sessionUrlOf, Storage, uploadToSignedUrl, type ListOptions, type ResumableUploadOptions, type ResumeUploadOptions, type SignOptions,
+  type StoredObject, type UploadBody,
   type UploadGrant, type UploadOptions,
 } from './storage.ts'
 export {
-  AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, ResyncError, RetryVerifyError, TimeoutError, UnknownOutcomeError,
+  AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, ResyncError, RetryVerifyError, TimeoutError, TxExpiredError, UnknownOutcomeError,
   isCode, UnitError, UnitErrorCode, type ErrorCodeValue, type UnitErrorCodeValue,
 } from './errors.ts'
 export {
