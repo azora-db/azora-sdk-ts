@@ -10,6 +10,7 @@ export const ErrorCode = {
   Conflict: 'conflict',
   Internal: 'internal',
   Canceled: 'canceled',
+  TxExpired: 'tx_expired',
 } as const
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode] | (string & {})
 
@@ -34,7 +35,21 @@ export class AzoraError extends Error {
   }
 }
 
-/** The client (or a subscription) was closed. */
+/**
+ * An interactive transaction (`db.tx`) is not open any more: its lease ran
+ * out (too long without a statement, or open longer than the server
+ * allows), or the connection that held it was lost. The server rolled it
+ * back, so none of its writes applied; run it again from the start. Its
+ * `code` is `tx_expired`.
+ */
+export class TxExpiredError extends AzoraError {
+  override name = 'TxExpiredError'
+  constructor(message: string) {
+    super(ErrorCode.TxExpired, message)
+  }
+}
+
+/** The client (or a subscription) was closed; also a call on a transaction that has ended. */
 export class ClosedError extends Error {
   override name = 'ClosedError'
   constructor(message = 'azora: closed') {
