@@ -3,6 +3,7 @@
  * engine: the same units, the same calls, the same answers. Skipped when
  * there is no engine binary or it has no units.
  */
+import { createHash, createHmac } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { AzoraError, connect, UnitError, type Database } from '../../src/index.ts'
 import { publishUnits } from '../../packages/units/src/publish.ts'
@@ -19,6 +20,7 @@ const SCHEMA = [
   'CREATE TABLE carts(id TEXT PRIMARY KEY, customer INTEGER NOT NULL, total REAL NOT NULL, note TEXT)',
   'CREATE TABLE audit(id INTEGER PRIMARY KEY, at INTEGER NOT NULL, what TEXT NOT NULL, detail TEXT)',
   'CREATE TABLE counter(id INTEGER PRIMARY KEY, n INTEGER NOT NULL)',
+  'CREATE TABLE docs(id INTEGER PRIMARY KEY, title TEXT NOT NULL, file FILE)',
 ]
 const CARTS = "INSERT INTO carts(id, customer, total, note) VALUES ('k42', 42, 20, 'mine'), ('k7', 7, 5, 'theirs'), ('k9', 9, 3, 'later')"
 
@@ -56,7 +58,10 @@ describe.skipIf(!engineBinary())('units: local test environment = engine', () =>
     db = await connect<Units>(url, { token: engine.apiKey })
     customer = await connect<Units>(url, { token: engine.tokens['customer42']! })
     await publishUnits(db, dir)
-    local = createTestEnv(fixture, { schema: [...SCHEMA, CARTS], auth: { kind: 'key', principal: 'key:app', scopes: ['read', 'write', 'ddl'] } })
+    await db.unitsAdmin.secrets.set('HOOK_SECRET', 'whsec_test')
+    local = createTestEnv(fixture, {
+      schema: [...SCHEMA, CARTS], auth: { kind: 'key', principal: 'key:app', scopes: ['read', 'write', 'ddl'] }, env: { HOOK_SECRET: 'whsec_test' },
+    })
     // The customer shares the local database: another env would have its own.
     asCustomer = { ...local, call: ((name: string, args?: unknown) => untyped(local)(name, args, { auth: { subject: 'user:42', scopes: ['read'] } })) as unknown as TestEnv<Units>['call'] }
   })
@@ -121,6 +126,111 @@ describe.skipIf(!engineBinary())('units: local test environment = engine', () =>
     const view = (r: { unit: string; trigger: string; principal: string; status: string; error: string }) => [r.unit, r.trigger, r.principal, r.status, r.error]
     expect(localRuns.map(view)).toEqual(remoteRuns.map(view))
     expect(localRuns.length).toBe(cases.length - 1) // an unknown unit is not logged
+  })
+
+  it('ctx.storage: files are stored, read and deleted the same way, and roll back with a mutation', async () => {
+    // A file bound to a row.
+    const remote = await db.call('saveDoc', { title: 'notes', text: 'hello from a unit' })
+    const here = await local.call('saveDoc', { title: 'notes', text: 'hello from a unit' })
+    expect(here).toEqual(remote)
+    const doc = await db.call('readDoc', { id: (remote as { id: number }).id })
+    expect(await local.call('readDoc', { id: (here as { id: number }).id })).toEqual(doc)
+    expect(doc).toEqual({
+      file: {
+        bucket: 'default', path: '', name: 'notes.txt', contentType: 'text/plain', size: 17,
+        sha256: createHash('sha256').update('hello from a unit').digest('hex'),
+        metadata: { title: 'notes' },
+      },
+      text: 'hello from a unit', bytes: 17, link: true, missing: null,
+    })
+    expect(local.storage.list().map((f) => f.name)).toEqual(['notes.txt'])
+    expect(local.storage.text(local.db.value<string>('SELECT file FROM docs WHERE id = 1') as string)).toBe('hello from a unit')
+
+    // A file on its own: found by its path, refused twice, deleted.
+    const report = await db.call('putReport', { path: 'reports/q3.txt', text: 'revenue' })
+    expect(await local.call('putReport', { path: 'reports/q3.txt', text: 'revenue' })).toEqual(report)
+    expect(await local.call('findReport', { path: 'reports/q3.txt' })).toEqual(await db.call('findReport', { path: 'reports/q3.txt' }))
+    const twice = await settle(db.call('putReport', { path: 'reports/q3.txt', text: 'again' }))
+    const twiceHere = await settle(local.call('putReport', { path: 'reports/q3.txt', text: 'again' }))
+    expect(twice.ok).toBe(false)
+    expect(twiceHere.ok).toBe(false)
+    expect(await local.call('dropReport', { path: 'reports/q3.txt' })).toBe(true)
+    expect(await db.call('dropReport', { path: 'reports/q3.txt' })).toBe(true)
+    expect(await local.call('dropReport', { path: 'reports/q3.txt' })).toBe(false)
+    expect(await db.call('dropReport', { path: 'reports/q3.txt' })).toBe(false)
+    expect(await local.call('findReport', { path: 'reports/q3.txt' })).toBeNull()
+    expect(await db.call('findReport', { path: 'reports/q3.txt' })).toBeNull()
+
+    // A mutation that throws leaves no file behind.
+    expect(await settle(local.call('putThenFail', { path: 'lost/a.txt' }))).toEqual(await settle(db.call('putThenFail', { path: 'lost/a.txt' })))
+    expect(await local.call('findReport', { path: 'lost/a.txt' })).toBeNull()
+    expect(await db.call('findReport', { path: 'lost/a.txt' })).toBeNull()
+
+    // What is refused, with the same words; and an upload link.
+    for (const unit of ['queryPut', 'readMissing']) {
+      const r = await settle(db.call(unit))
+      expect(r.ok, unit).toBe(false)
+      expect(await settle(untyped(local)(unit)), unit).toEqual(r)
+    }
+    expect(await settle(db.call('queryPut'))).toMatchObject({ error: { message: 'a query cannot store files (make it a mutation or an action)' } })
+    expect(await settle(db.call('readMissing'))).toMatchObject({ error: { message: 'ctx.storage: no file obj_nope' } })
+    expect(await db.call('avatarUpload')).toEqual({ link: true, inFuture: true })
+    expect(await local.call('avatarUpload')).toEqual({ link: true, inFuture: true })
+  })
+
+  it('units over plain HTTP answer the same way: arguments, ctx.request, credentials, a webhook', async () => {
+    const base = `${engine.httpUrl}/units/v1/shop/`
+    /** The same request to the engine and to the local environment, as [status, body, some headers]. */
+    const both = async (unit: string, o: { method?: string; path?: string; query?: Record<string, string>; headers?: Record<string, string>; body?: string; key?: boolean } = {}) => {
+      const qs = o.query ? `?${new URLSearchParams(o.query)}` : ''
+      const res = await fetch(`${base}${unit}${o.path ?? ''}${qs}`, {
+        method: o.method ?? (o.body === undefined ? 'GET' : 'POST'),
+        headers: { ...o.headers, ...(o.key && { Authorization: `Bearer ${engine.apiKey}` }) },
+        ...(o.body !== undefined && { body: o.body }),
+      })
+      const remote = { status: res.status, body: await res.text(), type: res.headers.get('content-type'), handled: res.headers.get('x-handled') }
+      const l = await local.request(unit, {
+        ...(o.method && { method: o.method }), ...(o.path && { path: o.path }), ...(o.query && { query: o.query }), ...(o.headers && { headers: o.headers }),
+        ...(o.body !== undefined && { body: o.body }), ...(o.key && { auth: { kind: 'key' as const, principal: 'key:app', scopes: ['read', 'write', 'ddl'] } }),
+      })
+      const here = { status: l.status, body: l.body, type: l.headers['content-type'] ?? null, handled: l.headers['x-handled'] ?? null }
+      // JSON bodies are compared as values: Go and JavaScript escape a few characters differently.
+      const value = (r: typeof remote): unknown => (r.type?.includes('json') ? { ...r, body: JSON.parse(r.body) as unknown } : r)
+      expect(value(here), `${unit} ${JSON.stringify(o)}`).toEqual(value(remote))
+      return remote
+    }
+    const json = { 'Content-Type': 'application/json' }
+
+    // A public unit: no credential; the JSON body is the arguments, the request is ctx.request.
+    const echo = await both('httpEcho', { path: '/items/7', query: { x: '1' }, headers: { ...json, 'X-Test': 'yes' }, body: '{"n":1}' })
+    expect(echo.status).toBe(200)
+    expect(JSON.parse(echo.body)).toEqual({ args: { n: 1 }, method: 'POST', path: '/items/7', query: { x: '1' }, body: '{"n":1}', test: 'yes', kind: 'public', via: 'http' })
+    // Without a body the query is the arguments; a body that is not JSON is not.
+    expect(JSON.parse((await both('httpEcho', { query: { a: '1', b: 'two' } })).body)).toMatchObject({ args: { a: '1', b: 'two' }, method: 'GET' })
+    expect(JSON.parse((await both('httpEcho', { headers: { 'Content-Type': 'text/plain' }, body: 'plain' })).body)).toMatchObject({ args: null, body: 'plain' })
+    expect((await both('httpEcho', { headers: json, body: '{"n":' })).status).toBe(400)
+
+    // A unit that needs a credential: 401 without, checked arguments with.
+    expect((await both('httpSum', { headers: json, body: '{"a":1,"b":2}' })).status).toBe(401)
+    expect(await both('httpSum', { headers: json, body: '{"a":1,"b":2}', key: true })).toMatchObject({ status: 200, body: '{"sum":3}' })
+    expect((await both('httpSum', { headers: json, body: '{"a":"x","b":2}', key: true })).status).toBe(400)
+
+    // Units that do not declare http are not there, for anyone.
+    expect((await both('checkout', { headers: json, body: '{"cartId":"k42"}', key: true })).status).toBe(404)
+    expect((await both('audit', { key: true })).status).toBe(404)
+    expect((await both('nope')).status).toBe(404)
+
+    // A webhook: the signature is checked over the raw body; the answer is the unit's own.
+    const event = '{"type":"invoice.paid"}'
+    const sig = createHmac('sha256', 'whsec_test').update(event).digest('hex')
+    const ok = await both('httpHook', { headers: { ...json, 'X-Signature': sig }, body: event })
+    expect(ok).toEqual({ status: 202, body: 'accepted invoice.paid', type: 'text/plain; charset=utf-8', handled: 'yes' })
+    const bad = await both('httpHook', { headers: { ...json, 'X-Signature': 'f'.repeat(64) }, body: event })
+    expect(bad.status).toBe(403)
+    expect(JSON.parse(bad.body)).toEqual({ error: { code: 'permission_denied', message: 'bad signature' } })
+    const hooks = "SELECT count(*) FROM audit WHERE what = 'hook'"
+    expect(local.db.value(hooks)).toBe(1)
+    expect(await db.queryValue(hooks)).toBe(1)
   })
 
   it('a scheduled job runs the same way: as the system, with ctx.unit.job, removed when done', async () => {
