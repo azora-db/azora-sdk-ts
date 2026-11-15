@@ -63,7 +63,7 @@ describe('connectEnv', () => {
     vi.stubEnv('AZORA_API_KEY', 'azk_ignored')
     const db = keep(await connectEnv({ transport: s.transport, clientName: 'env-test/1' }))
     expect(db.name).toBe('shop')
-    expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, database: 'shop', credential: 'azk_from_env', client: 'env-test/1' })
+    expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, database: 'shop', credential: 'azk_from_env', client: 'env-test/1 +tx' })
   })
 
   test('falls back to AZORA_API_KEY; a credential in options wins over the environment', async () => {
