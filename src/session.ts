@@ -3,7 +3,7 @@ import { type Channel, fingerprint, openChannel } from './channel.ts'
 import { encodeServerKey, type ResolvedOptions } from './config.ts'
 import { AzoraError, ConnectionError, LostError } from './errors.ts'
 import type { Endpoint } from './discovery.ts'
-import { decode, encode, MsgType, PROTOCOL_VERSION, type Msg, type Welcome } from './messages.ts'
+import { CLIENT_TX, decode, encode, MsgType, PROTOCOL_VERSION, type Msg, type Welcome } from './messages.ts'
 import { connectWebSocket, type Transport } from './transport.ts'
 import { connectTCP } from '#tcp'
 
@@ -20,6 +20,12 @@ export interface Session {
   /** What it may do: `read`, `write`, `ddl`, `admin`. */
   scopes: string[]
   maxSubscriptions: number
+  /**
+   * How long an interactive transaction (`db.tx`) may stay without a
+   * statement before the server rolls it back, in ms; 0 when the server
+   * has no interactive transactions.
+   */
+  txIdleMs: number
   /** The channel's security: `IK`, `XX` or `plaintext`. */
   mode: string
   /** The server's public key (base64url; empty in plaintext) and its fingerprint. */
@@ -71,6 +77,7 @@ export class Link {
       principal: w.principal,
       scopes: w.scopes,
       maxSubscriptions: w.maxSubscriptions,
+      txIdleMs: w.txIdleMs ?? 0,
       mode: ch.mode,
       serverKey: ch.serverKey ? encodeServerKey(ch.serverKey) : '',
       fingerprint: ch.serverKey ? fingerprint(ch.serverKey) : '',
@@ -101,6 +108,7 @@ export class Link {
       case MsgType.Signed:
       case MsgType.Returned:
       case MsgType.UnitAdminResult:
+      case MsgType.TxBegun:
         this.deliver(m.reqId, m)
         return
       case MsgType.Error:
@@ -246,7 +254,7 @@ export async function dial(o: ResolvedOptions, credential: string, signal: Abort
         }
       }
       try {
-        ch.send(encode({ type: MsgType.Hello, version: PROTOCOL_VERSION, database: o.database, credential, client: o.clientName }))
+        ch.send(encode({ type: MsgType.Hello, version: PROTOCOL_VERSION, database: o.database, credential, client: `${o.clientName} ${CLIENT_TX}` }))
       } catch (e) {
         reject(e as Error)
       }
