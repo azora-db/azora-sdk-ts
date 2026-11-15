@@ -61,6 +61,35 @@ describe('azora-units', () => {
     expect(JSON.parse(o3.lines.join('\n'))).toMatchObject({ version: 3, unchanged: true, dryRun: false })
   })
 
+  test('build writes the bundle and its source map to a file, without a server', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'azora-units-build-'))
+    const out = join(dir, 'dist', 'units.js')
+    const o = io()
+    const never = async (): Promise<Conn> => {
+      throw new Error('build must not connect')
+    }
+    expect(await main(['build', fixture('shop'), '--out', out], o, never)).toBe(0)
+    const bundle = readFileSync(out, 'utf8')
+    expect(bundle).toContain('globalThis.__azora_units')
+    expect(JSON.parse(readFileSync(`${out}.map`, 'utf8'))).toHaveProperty('mappings')
+    expect(o.lines[0]).toMatch(/^Wrote .*units\.js \(.*\) with 5 units:$/)
+    expect(o.lines.join('\n')).toContain('checkout')
+    expect(o.lines.at(-1)).toContain('azora units deploy <database>')
+
+    // The same bytes as publish sends: the bundle is a build artifact.
+    const { conn, ops } = server(() => ({ version: 1, sha256: 'a'.repeat(64), unchanged: false, dry_run: false, units: [unit] }))
+    expect(await main(['publish', fixture('shop')], io(), async () => conn)).toBe(0)
+    expect(ops[0]?.[1].bundle).toBe(bundle)
+
+    const j = io()
+    expect(await main(['build', fixture('shop'), '-o', out, '--json'], j, never)).toBe(0)
+    expect(JSON.parse(j.lines[0] as string)).toMatchObject({ file: out, sourceMap: `${out}.map`, bytes: bundle.length })
+    // Without --out, and a directory that does not build.
+    const bad = io()
+    expect(await main(['build', fixture('shop')], bad, never)).toBe(2)
+    expect(bad.errors[0]).toContain('--out <file>')
+  })
+
   test('a bundle that does not build fails before connecting', async () => {
     const out = io()
     const connector = vi.fn()
