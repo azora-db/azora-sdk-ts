@@ -24,7 +24,11 @@ export function normalize(args: Args | undefined): Value[] | null {
 }
 
 /** @internal Splits the (sql, args?, opts?) | (statement, opts?) call shapes. */
-export function unpack<O>(a: string | Statement, b?: Args | O, c?: O): { sql: string; args: Value[] | null; opts: O | undefined } {
+export function unpack<O>(
+  a: string | Statement,
+  b?: Args | O,
+  c?: O,
+): { sql: string; args: Value[] | null; opts: O | undefined } {
   if (typeof a === 'string') {
     if (b !== undefined && !Array.isArray(b)) return { sql: a, args: null, opts: b as O }
     return { sql: a, args: normalize(b as Args | undefined), opts: c }
@@ -141,7 +145,11 @@ export class Transaction {
   /** The first column of the first row, or undefined when there is no row. */
   async queryValue<T extends Value = Value>(sql: string, args?: Args, opts?: CallOptions): Promise<T | undefined>
   async queryValue<T extends Value = Value>(statement: Statement, opts?: CallOptions): Promise<T | undefined>
-  async queryValue<T extends Value = Value>(a: string | Statement, b?: Args | CallOptions, c?: CallOptions): Promise<T | undefined> {
+  async queryValue<T extends Value = Value>(
+    a: string | Statement,
+    b?: Args | CallOptions,
+    c?: CallOptions,
+  ): Promise<T | undefined> {
     const { sql, args, opts } = unpack<CallOptions>(a, b, c)
     const row = (await this.run(sql, args, true, opts)).rows[0]
     return row ? ((row[0] ?? null) as T) : undefined
