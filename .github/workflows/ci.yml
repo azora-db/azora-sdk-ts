@@ -44,6 +44,9 @@ jobs:
       - name: Install
         working-directory: sdk
         run: pnpm install --frozen-lockfile
+      - name: Format
+        working-directory: sdk
+        run: pnpm fmt:check
       - name: Typecheck
         working-directory: sdk
         run: pnpm typecheck
