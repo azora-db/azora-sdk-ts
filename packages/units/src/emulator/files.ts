@@ -19,9 +19,23 @@ CREATE UNIQUE INDEX azora_objects_path ON azora_objects(bucket, path) WHERE path
 CREATE TABLE azora_test_content(id TEXT PRIMARY KEY REFERENCES azora_objects(id) ON DELETE CASCADE, content BLOB NOT NULL);`
 
 const TYPES: Record<string, string> = {
-  txt: 'text/plain', md: 'text/markdown', html: 'text/html', css: 'text/css', csv: 'text/csv', json: 'application/json', js: 'text/javascript',
-  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-  zip: 'application/zip', mp4: 'video/mp4', mp3: 'audio/mpeg',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  html: 'text/html',
+  css: 'text/css',
+  csv: 'text/csv',
+  json: 'application/json',
+  js: 'text/javascript',
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  zip: 'application/zip',
+  mp4: 'video/mp4',
+  mp3: 'audio/mpeg',
 }
 
 /** A file waiting to be stored: the value of `ctx.storage.upload`. */
@@ -52,8 +66,15 @@ interface ObjectRow {
 
 function fileOf(r: ObjectRow): StoredFile {
   return {
-    id: r.id, bucket: r.bucket, path: r.path, name: r.name, contentType: r.content_type, size: Number(r.size), sha256: r.sha256,
-    metadata: JSON.parse(r.metadata) as Record<string, string>, createdAt: Number(r.created_at),
+    id: r.id,
+    bucket: r.bucket,
+    path: r.path,
+    name: r.name,
+    contentType: r.content_type,
+    size: Number(r.size),
+    sha256: r.sha256,
+    metadata: JSON.parse(r.metadata) as Record<string, string>,
+    createdAt: Number(r.created_at),
   }
 }
 
@@ -78,16 +99,22 @@ export class FileStore {
   }
 
   statPath(path: string, bucket = 'default'): StoredFile | null {
-    const r = this.db.prepare(`SELECT ${COLS} FROM azora_objects WHERE bucket = ? AND path = ?`).get(bucket || 'default', path) as ObjectRow | undefined
+    const r = this.db
+      .prepare(`SELECT ${COLS} FROM azora_objects WHERE bucket = ? AND path = ?`)
+      .get(bucket || 'default', path) as ObjectRow | undefined
     return r ? fileOf(r) : null
   }
 
   list(): StoredFile[] {
-    return (this.db.prepare(`SELECT ${COLS} FROM azora_objects ORDER BY created_at, id`).all() as unknown as ObjectRow[]).map(fileOf)
+    return (
+      this.db.prepare(`SELECT ${COLS} FROM azora_objects ORDER BY created_at, id`).all() as unknown as ObjectRow[]
+    ).map(fileOf)
   }
 
   read(id: string): Uint8Array | null {
-    const r = this.db.prepare('SELECT content FROM azora_test_content WHERE id = ?').get(id) as { content: Uint8Array } | undefined
+    const r = this.db.prepare('SELECT content FROM azora_test_content WHERE id = ?').get(id) as
+      | { content: Uint8Array }
+      | undefined
     return r ? new Uint8Array(r.content) : null
   }
 
@@ -106,13 +133,17 @@ export class FileStore {
     if (existing) {
       if (!o.overwrite) throw new Error(`object exists: ${bucket}/${path} (pass overwrite to replace its content)`)
       // The content changes, the id stays.
-      this.db.prepare('UPDATE azora_objects SET name = ?, content_type = ?, size = ?, sha256 = ?, metadata = ?, updated_at = ? WHERE id = ?')
+      this.db
+        .prepare(
+          'UPDATE azora_objects SET name = ?, content_type = ?, size = ?, sha256 = ?, metadata = ?, updated_at = ? WHERE id = ?',
+        )
         .run(name, type, u.content.length, sha, meta, at, existing.id)
       this.db.prepare('UPDATE azora_test_content SET content = ? WHERE id = ?').run(u.content, existing.id)
       return this.stat(existing.id) as StoredFile
     }
     const id = this.newId()
-    this.db.prepare(`INSERT INTO azora_objects(${COLS}, auto_delete, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db
+      .prepare(`INSERT INTO azora_objects(${COLS}, auto_delete, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, bucket, path, name, type, u.content.length, sha, meta, at, u.keep ? 0 : 1, at)
     this.db.prepare('INSERT INTO azora_test_content(id, content) VALUES (?, ?)').run(id, u.content)
     return this.stat(id) as StoredFile
@@ -131,7 +162,11 @@ export class FileStore {
 
   uploadUrl(grant: Record<string, unknown>, ttlSeconds: number): { url: string; expiresAt: number } {
     const expiresAt = this.now() + (ttlSeconds || 900) * 1000
-    const q = new URLSearchParams({ grant: JSON.stringify(grant), exp: String(Math.floor(expiresAt / 1000)), sig: 'test' })
+    const q = new URLSearchParams({
+      grant: JSON.stringify(grant),
+      exp: String(Math.floor(expiresAt / 1000)),
+      sig: 'test',
+    })
     return { url: `${this.origin}/storage/v1/u/test?${q}`, expiresAt }
   }
 }
