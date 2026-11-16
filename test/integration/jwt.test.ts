@@ -22,7 +22,15 @@ describe.skipIf(!engineBinary())('a token of an identity provider', () => {
   /** A token of the provider (or signed by another key), an hour long unless the claims say otherwise. */
   const token = (claims: Record<string, unknown> = {}, key: KeyObject = provider.privateKey): string => {
     const head = b64(JSON.stringify({ alg: 'ES256', kid: 'k1', typ: 'JWT' }))
-    const body = b64(JSON.stringify({ iss: 'https://id.test/', aud: 'shop-api', sub: '42', exp: Math.floor(Date.now() / 1000) + 3600, ...claims }))
+    const body = b64(
+      JSON.stringify({
+        iss: 'https://id.test/',
+        aud: 'shop-api',
+        sub: '42',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        ...claims,
+      }),
+    )
     const sig = cryptoSign('sha256', Buffer.from(`${head}.${body}`), { key, dsaEncoding: 'ieee-p1363' })
     return `${head}.${body}.${b64(sig)}`
   }
@@ -37,8 +45,26 @@ describe.skipIf(!engineBinary())('a token of an identity provider', () => {
     // The provider is on loopback here; a real one is public and https.
     engine = await startEngine({ server: { jwks_allow_private: true } })
     await engine.stop()
-    engine.cli('meta', 'issuer', 'add', 'shop', '--issuer', 'https://id.test/', '--jwks-url', url, '--audience', 'shop-api',
-      '--scope', 'read,write', '--scopes-claim', 'scope', '--table', 'orders', '--filter', 'orders: customer = {sub:int}')
+    engine.cli(
+      'meta',
+      'issuer',
+      'add',
+      'shop',
+      '--issuer',
+      'https://id.test/',
+      '--jwks-url',
+      url,
+      '--audience',
+      'shop-api',
+      '--scope',
+      'read,write',
+      '--scopes-claim',
+      'scope',
+      '--table',
+      'orders',
+      '--filter',
+      'orders: customer = {sub:int}',
+    )
     await engine.start()
   })
   afterEach(async () => {
@@ -52,9 +78,13 @@ describe.skipIf(!engineBinary())('a token of an identity provider', () => {
 
   test('signs in as the user and sees only its rows', async () => {
     const admin = keep(await connect(`${engine.connectUrl}?key=${engine.serverKey}`, { token: engine.apiKey }))
-    await admin.exec("INSERT INTO orders(id, customer, status, total) VALUES (1, 42, 'open', 5), (2, 7, 'open', 6), (3, 42, 'paid', 7)")
+    await admin.exec(
+      "INSERT INTO orders(id, customer, status, total) VALUES (1, 42, 'open', 5), (2, 7, 'open', 6), (3, 42, 'paid', 7)",
+    )
 
-    const user = keep(await connect(`${engine.connectUrl}?key=${engine.serverKey}`, { token: token({ scope: 'read openid' }) }))
+    const user = keep(
+      await connect(`${engine.connectUrl}?key=${engine.serverKey}`, { token: token({ scope: 'read openid' }) }),
+    )
     expect(user.session).toMatchObject({ principal: 'user:42', scopes: ['read'] })
     const mine = await user.live<{ id: number }>('orders')
     await mine.ready
