@@ -344,11 +344,15 @@ export class UnitsAdmin {
       },
     }
     this.secrets = {
-      list: async (opts) => ((await this.op<{ secrets?: unknown[] }>('secrets.list', {}, opts)).secrets ?? []).map((s) => camel<UnitSecret>(s)),
+      list: async (opts) =>
+        ((await this.op<{ secrets?: unknown[] }>('secrets.list', {}, opts)).secrets ?? []).map((s) =>
+          camel<UnitSecret>(s),
+        ),
       set: async (name, value, opts) => {
         await this.op('secrets.set', { name, value }, opts)
       },
-      unset: async (name, opts) => Boolean((await this.op<{ removed?: unknown }>('secrets.unset', { name }, opts)).removed),
+      unset: async (name, opts) =>
+        Boolean((await this.op<{ removed?: unknown }>('secrets.unset', { name }, opts)).removed),
     }
   }
 
@@ -412,7 +416,13 @@ export class UnitsAdmin {
    * status, older than run id `before` or newer than run id `after`.
    */
   async runs(
-    o: { limit?: number; unit?: string; status?: 'ok' | 'error' | 'replayed' | 'rejected'; before?: number; after?: number } = {},
+    o: {
+      limit?: number
+      unit?: string
+      status?: 'ok' | 'error' | 'replayed' | 'rejected'
+      before?: number
+      after?: number
+    } = {},
     opts?: CallOptions,
   ): Promise<UnitRun[]> {
     const r = await this.op<{ runs?: unknown[] }>('runs', o, opts)
