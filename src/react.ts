@@ -16,7 +16,16 @@
  * @packageDocumentation
  */
 import {
-  createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode,
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
 } from 'react'
 import type { InputValue } from './codec.ts'
 import type { Database } from './database.ts'
@@ -43,7 +52,9 @@ export function useAzora<M = unknown>(): Database<M> {
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)))
 const valueKey = (v: unknown): string =>
-  JSON.stringify(v ?? null, (_k, x: unknown) => (typeof x === 'bigint' ? `${x}n` : x instanceof Uint8Array ? Array.from(x) : x))
+  JSON.stringify(v ?? null, (_k, x: unknown) =>
+    typeof x === 'bigint' ? `${x}n` : x instanceof Uint8Array ? Array.from(x) : x,
+  )
 
 const EMPTY: readonly never[] = Object.freeze([])
 
@@ -63,14 +74,24 @@ export interface LiveQueryState<T> {
  * written inline. Pass `enabled: false` to wait (for example until a
  * parameter is known).
  */
-export function useLiveQuery<T = Row>(table: string, options: LiveOptions<T> & { enabled?: boolean } = {}): LiveQueryState<T> {
+export function useLiveQuery<T = Row>(
+  table: string,
+  options: LiveOptions<T> & { enabled?: boolean } = {},
+): LiveQueryState<T> {
   const db = useAzora()
   const { enabled = true, map, orderBy, onVerify, ...rest } = options
   // Functions cannot be compared by value: keep the latest in a ref.
   const fns = useRef({ map, orderBy, onVerify })
   fns.current = { map, orderBy, onVerify }
-  const key = JSON.stringify([table, rest.where ?? null, rest.key ?? null, typeof orderBy === 'function' ? 'fn' : (orderBy ?? null), rest.verifyEvery ?? 0], (_k, v: unknown) =>
-    typeof v === 'bigint' ? `${v}n` : v instanceof Uint8Array ? Array.from(v) : v,
+  const key = JSON.stringify(
+    [
+      table,
+      rest.where ?? null,
+      rest.key ?? null,
+      typeof orderBy === 'function' ? 'fn' : (orderBy ?? null),
+      rest.verifyEvery ?? 0,
+    ],
+    (_k, v: unknown) => (typeof v === 'bigint' ? `${v}n` : v instanceof Uint8Array ? Array.from(v) : v),
   )
   const [live, setLive] = useState<LiveQuery<T> | null>(null)
   const [error, setError] = useState<Error | null>(null)
@@ -140,8 +161,14 @@ export function useQuery<T = Row>(
   const { watch = [], enabled = true } = options
   const text = typeof query === 'string' ? query : query.sql
   const params = typeof query === 'string' ? args : (query.args ?? [])
-  const key = JSON.stringify([text, params, watch], (_k, v: unknown) => (typeof v === 'bigint' ? `${v}n` : v instanceof Uint8Array ? Array.from(v) : v))
-  const [state, setState] = useState<{ rows: T[] | undefined; loading: boolean; error: Error | null }>({ rows: undefined, loading: enabled, error: null })
+  const key = JSON.stringify([text, params, watch], (_k, v: unknown) =>
+    typeof v === 'bigint' ? `${v}n` : v instanceof Uint8Array ? Array.from(v) : v,
+  )
+  const [state, setState] = useState<{ rows: T[] | undefined; loading: boolean; error: Error | null }>({
+    rows: undefined,
+    loading: enabled,
+    error: null,
+  })
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -157,16 +184,20 @@ export function useQuery<T = Row>(
       }
       running = true
       setState((s) => ({ ...s, loading: true }))
-      db.query<T>(text, params).then(
-        (rows) => !cancelled && setState({ rows, loading: false, error: null }),
-        (e: unknown) => !cancelled && setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) })),
-      ).finally(() => {
-        running = false
-        if (again && !cancelled) {
-          again = false
-          run()
-        }
-      })
+      db.query<T>(text, params)
+        .then(
+          (rows) => !cancelled && setState({ rows, loading: false, error: null }),
+          (e: unknown) =>
+            !cancelled &&
+            setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) })),
+        )
+        .finally(() => {
+          running = false
+          if (again && !cancelled) {
+            again = false
+            run()
+          }
+        })
     }
     run()
     if (watch.length > 0) {
@@ -227,7 +258,11 @@ export interface UnitState<R, A> {
  */
 export function useUnit<R = unknown, A = any>(name: string): UnitState<R, A> {
   const db = useAzora()
-  const [state, setState] = useState<{ pending: boolean; error: Error | null; data: R | undefined }>({ pending: false, error: null, data: undefined })
+  const [state, setState] = useState<{ pending: boolean; error: Error | null; data: R | undefined }>({
+    pending: false,
+    error: null,
+    data: undefined,
+  })
   const seq = useRef(0)
   const mounted = useRef(true)
   useEffect(() => {
@@ -281,7 +316,11 @@ export function useUnitQuery<R = unknown, A = any>(
   const db = useAzora()
   const { watch = [], enabled = true } = options
   const key = valueKey([name, args === undefined ? '\u0000none' : args, deps, watch])
-  const [state, setState] = useState<{ data: R | undefined; loading: boolean; error: Error | null }>({ data: undefined, loading: enabled, error: null })
+  const [state, setState] = useState<{ data: R | undefined; loading: boolean; error: Error | null }>({
+    data: undefined,
+    loading: enabled,
+    error: null,
+  })
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -297,16 +336,18 @@ export function useUnitQuery<R = unknown, A = any>(
       }
       running = true
       setState((s) => ({ ...s, loading: true }))
-      db.call<R>(name, args).then(
-        (data) => !cancelled && setState({ data, loading: false, error: null }),
-        (e: unknown) => !cancelled && setState((s) => ({ ...s, loading: false, error: toError(e) })),
-      ).finally(() => {
-        running = false
-        if (again && !cancelled) {
-          again = false
-          run()
-        }
-      })
+      db.call<R>(name, args)
+        .then(
+          (data) => !cancelled && setState({ data, loading: false, error: null }),
+          (e: unknown) => !cancelled && setState((s) => ({ ...s, loading: false, error: toError(e) })),
+        )
+        .finally(() => {
+          running = false
+          if (again && !cancelled) {
+            again = false
+            run()
+          }
+        })
     }
     run()
     if (watch.length > 0) {
