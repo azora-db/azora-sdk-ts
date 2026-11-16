@@ -31,7 +31,11 @@ function customerOf(ctx: BaseCtx): number {
 /** The caller's orders, newest first. A token limited to its own rows cannot run this SQL itself; the unit can. */
 export const myOrders = query({
   description: "The signed-in customer's orders, newest first.",
-  handler: (ctx) => ctx.db.all<Order>('SELECT id, customer, status, total, note FROM orders WHERE customer = ? ORDER BY id DESC', customerOf(ctx)),
+  handler: (ctx) =>
+    ctx.db.all<Order>(
+      'SELECT id, customer, status, total, note FROM orders WHERE customer = ? ORDER BY id DESC',
+      customerOf(ctx),
+    ),
 })
 
 /**
@@ -48,10 +52,19 @@ export const checkout = mutation({
   async handler(ctx, { cartId }) {
     const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
     if (!cart) throw new UnitError('not_found', 'no such cart', { cartId })
-    if (ctx.auth.kind === 'token' && cart.customer !== customerOf(ctx)) throw new UnitError('permission_denied', 'this cart is not yours')
-    const { lastInsertId } = ctx.db.exec("INSERT INTO orders(customer, status, total, note) VALUES (?, 'open', ?, ?)", cart.customer, cart.total, cart.note)
+    if (ctx.auth.kind === 'token' && cart.customer !== customerOf(ctx))
+      throw new UnitError('permission_denied', 'this cart is not yours')
+    const { lastInsertId } = ctx.db.exec(
+      "INSERT INTO orders(customer, status, total, note) VALUES (?, 'open', ?, ?)",
+      cart.customer,
+      cart.total,
+      cart.note,
+    )
     ctx.db.exec('DELETE FROM carts WHERE id = ?', cartId)
-    await ctx.run('audit', { what: 'checkout', detail: `cart ${cartId} -> order ${lastInsertId} by ${ctx.auth.principal}` })
+    await ctx.run('audit', {
+      what: 'checkout',
+      detail: `cart ${cartId} -> order ${lastInsertId} by ${ctx.auth.principal}`,
+    })
     return { orderId: lastInsertId, total: cart.total }
   },
 })
@@ -68,7 +81,8 @@ export const remindCart = mutation({
   handler(ctx, { cartId, minutes }) {
     const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
     if (!cart) throw new UnitError('not_found', 'no such cart', { cartId })
-    if (ctx.auth.kind === 'token' && cart.customer !== customerOf(ctx)) throw new UnitError('permission_denied', 'this cart is not yours')
+    if (ctx.auth.kind === 'token' && cart.customer !== customerOf(ctx))
+      throw new UnitError('permission_denied', 'this cart is not yours')
     const jobId: string = ctx.scheduler.after((minutes ?? 24 * 60) * 60_000, 'cartReminder', { cartId })
     return { jobId }
   },
@@ -81,7 +95,12 @@ export const cartReminder = mutation({
   handler(ctx, { cartId }) {
     const cart = ctx.db.one<Cart>('SELECT id, customer, total, note FROM carts WHERE id = ?', cartId)
     if (!cart) return // checked out meanwhile: nothing to do (throwing would retry the job)
-    ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', ctx.now(), 'reminder', `cart ${cartId} of customer ${cart.customer} is waiting (${ctx.unit.job?.id})`)
+    ctx.db.exec(
+      'INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)',
+      ctx.now(),
+      'reminder',
+      `cart ${cartId} of customer ${cart.customer} is waiting (${ctx.unit.job?.id})`,
+    )
   },
 })
 
@@ -101,7 +120,13 @@ export const orderPlaced = onChange<Order>({
   handler: (ctx, { changes, gap }) => {
     if (gap) ctx.log.warn('some order changes were dropped before this unit saw them')
     for (const c of changes) {
-      if (c.new) ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', ctx.now(), 'order placed', `order ${c.new.id} for customer ${c.new.customer}: ${c.new.total}`)
+      if (c.new)
+        ctx.db.exec(
+          'INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)',
+          ctx.now(),
+          'order placed',
+          `order ${c.new.id} for customer ${c.new.customer}: ${c.new.total}`,
+        )
     }
   },
 })
@@ -112,6 +137,11 @@ export const stats = schedule({
   handler: (ctx) => {
     const open = ctx.db.value<number>("SELECT count(*) FROM orders WHERE status = 'open'") ?? 0
     const revenue = ctx.db.value<number>("SELECT coalesce(sum(total), 0) FROM orders WHERE status <> 'open'") ?? 0
-    ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', ctx.now(), 'stats', `${open} open orders, ${revenue} paid`)
+    ctx.db.exec(
+      'INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)',
+      ctx.now(),
+      'stats',
+      `${open} open orders, ${revenue} paid`,
+    )
   },
 })
