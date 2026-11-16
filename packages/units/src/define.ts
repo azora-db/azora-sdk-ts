@@ -42,14 +42,24 @@ export interface UnitDefinition<K extends UnitKind = UnitKind, A = unknown, R = 
 export type UnitAccess = 'any' | 'read' | 'write'
 
 /** A schedule unit's definition. */
-export interface ScheduleDefinition<M extends RunMode = RunMode> extends UnitDefinition<'schedule', undefined, unknown, true> {
+export interface ScheduleDefinition<M extends RunMode = RunMode> extends UnitDefinition<
+  'schedule',
+  undefined,
+  unknown,
+  true
+> {
   readonly mode: M
   readonly cron: string
   readonly every: string
 }
 
 /** An onChange unit's definition. */
-export interface OnChangeDefinition<M extends RunMode = RunMode> extends UnitDefinition<'onChange', undefined, unknown, true> {
+export interface OnChangeDefinition<M extends RunMode = RunMode> extends UnitDefinition<
+  'onChange',
+  undefined,
+  unknown,
+  true
+> {
   readonly mode: M
   readonly table: string
   readonly ops: ChangeOp[]
@@ -86,12 +96,26 @@ interface CallableOptions<I extends boolean> {
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const ACCESS: readonly string[] = ['any', 'read', 'write']
 
-function define<K extends UnitKind>(kind: K, def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): Record<string, unknown> {
-  if (typeof def !== 'object' || def === null) throw new TypeError(`azora units: ${kind}() takes an object ({ handler, ... })`)
+function define<K extends UnitKind>(
+  kind: K,
+  def: {
+    args?: ArgsSpec | undefined
+    internal?: boolean
+    access?: UnitAccess
+    http?: boolean | 'public'
+    description?: string
+    handler: unknown
+  },
+): Record<string, unknown> {
+  if (typeof def !== 'object' || def === null)
+    throw new TypeError(`azora units: ${kind}() takes an object ({ handler, ... })`)
   if (typeof def.handler !== 'function') throw new TypeError(`azora units: ${kind}() needs a handler function`)
-  if (def.access !== undefined && !ACCESS.includes(def.access)) throw new TypeError(`azora units: ${kind}() access must be "any", "read" or "write"`)
-  if (def.http !== undefined && typeof def.http !== 'boolean' && def.http !== 'public') throw new TypeError(`azora units: ${kind}() http must be true or "public"`)
-  if (def.http && def.internal) throw new TypeError(`azora units: ${kind}() an internal unit cannot be called over HTTP`)
+  if (def.access !== undefined && !ACCESS.includes(def.access))
+    throw new TypeError(`azora units: ${kind}() access must be "any", "read" or "write"`)
+  if (def.http !== undefined && typeof def.http !== 'boolean' && def.http !== 'public')
+    throw new TypeError(`azora units: ${kind}() http must be true or "public"`)
+  if (def.http && def.internal)
+    throw new TypeError(`azora units: ${kind}() an internal unit cannot be called over HTTP`)
   return {
     '~azora': 1,
     kind,
@@ -128,9 +152,13 @@ export interface HttpResponse {
  * })
  * ```
  */
-export function httpResponse(body?: unknown, init: { status?: number; headers?: { [name: string]: string } } = {}): HttpResponse {
+export function httpResponse(
+  body?: unknown,
+  init: { status?: number; headers?: { [name: string]: string } } = {},
+): HttpResponse {
   const status = init.status ?? 200
-  if (!Number.isInteger(status) || status < 200 || status > 599) throw new TypeError('azora units: httpResponse status must be an integer from 200 to 599')
+  if (!Number.isInteger(status) || status < 200 || status > 599)
+    throw new TypeError('azora units: httpResponse status must be an integer from 200 to 599')
   return { '~http': 1, status, headers: { ...init.headers }, body: body === undefined ? null : body }
 }
 
@@ -152,7 +180,14 @@ export function query<const S extends ArgsSpec, R, I extends boolean = false>(
 export function query<R, A = unknown, I extends boolean = false>(
   def: CallableOptions<I> & { args?: undefined; handler: (ctx: QueryCtx, args: A) => R },
 ): Def<'query', A, R, I>
-export function query(def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): unknown {
+export function query(def: {
+  args?: ArgsSpec | undefined
+  internal?: boolean
+  access?: UnitAccess
+  http?: boolean | 'public'
+  description?: string
+  handler: unknown
+}): unknown {
   return define('query', def)
 }
 
@@ -173,7 +208,14 @@ export function mutation<const S extends ArgsSpec, R, I extends boolean = false>
 export function mutation<R, A = unknown, I extends boolean = false>(
   def: CallableOptions<I> & { args?: undefined; handler: (ctx: MutationCtx, args: A) => R },
 ): Def<'mutation', A, R, I>
-export function mutation(def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): unknown {
+export function mutation(def: {
+  args?: ArgsSpec | undefined
+  internal?: boolean
+  access?: UnitAccess
+  http?: boolean | 'public'
+  description?: string
+  handler: unknown
+}): unknown {
   return define('mutation', def)
 }
 
@@ -188,7 +230,14 @@ export function action<const S extends ArgsSpec, R, I extends boolean = false>(
 export function action<R, A = unknown, I extends boolean = false>(
   def: CallableOptions<I> & { args?: undefined; handler: (ctx: ActionCtx, args: A) => R },
 ): Def<'action', A, R, I>
-export function action(def: { args?: ArgsSpec | undefined; internal?: boolean; access?: UnitAccess; http?: boolean | 'public'; description?: string; handler: unknown }): unknown {
+export function action(def: {
+  args?: ArgsSpec | undefined
+  internal?: boolean
+  access?: UnitAccess
+  http?: boolean | 'public'
+  description?: string
+  handler: unknown
+}): unknown {
   return define('action', def)
 }
 
@@ -212,8 +261,15 @@ export function schedule<M extends RunMode = 'mutation'>(def: {
   const cron = def?.cron ?? ''
   const every = def?.every ?? ''
   if ((cron === '') === (every === '')) throw new TypeError('azora units: schedule() needs one of cron or every')
-  if (every !== '' && !DURATION.test(every)) throw new TypeError(`azora units: schedule(): every ${JSON.stringify(every)} is not a duration like 30s, 5m or 1h30m`)
-  const d = define('schedule', { internal: true, ...(def.description !== undefined && { description: def.description }), handler: def.handler })
+  if (every !== '' && !DURATION.test(every))
+    throw new TypeError(
+      `azora units: schedule(): every ${JSON.stringify(every)} is not a duration like 30s, 5m or 1h30m`,
+    )
+  const d = define('schedule', {
+    internal: true,
+    ...(def.description !== undefined && { description: def.description }),
+    handler: def.handler,
+  })
   return Object.assign(d, { mode: def.mode ?? 'mutation', cron, every }) as unknown as ScheduleDefinition<M>
 }
 
@@ -235,11 +291,23 @@ export function onChange<T = Row, M extends RunMode = 'mutation'>(def: {
 }): OnChangeDefinition<M> {
   if (typeof def?.table !== 'string' || def.table === '') throw new TypeError('azora units: onChange() needs a table')
   const batch = def.batch ?? 100
-  if (!Number.isInteger(batch) || batch < 1) throw new TypeError(`azora units: onChange(): batch ${batch} is not a positive integer`)
+  if (!Number.isInteger(batch) || batch < 1)
+    throw new TypeError(`azora units: onChange(): batch ${batch} is not a positive integer`)
   const ops = def.ops ? [...def.ops] : ['insert', 'update', 'delete']
-  for (const op of ops) if (op !== 'insert' && op !== 'update' && op !== 'delete') throw new TypeError(`azora units: onChange(): unknown op ${JSON.stringify(op)}`)
-  const d = define('onChange', { internal: true, ...(def.description !== undefined && { description: def.description }), handler: def.handler })
-  return Object.assign(d, { mode: def.mode ?? 'mutation', table: def.table, ops, batch }) as unknown as OnChangeDefinition<M>
+  for (const op of ops)
+    if (op !== 'insert' && op !== 'update' && op !== 'delete')
+      throw new TypeError(`azora units: onChange(): unknown op ${JSON.stringify(op)}`)
+  const d = define('onChange', {
+    internal: true,
+    ...(def.description !== undefined && { description: def.description }),
+    handler: def.handler,
+  })
+  return Object.assign(d, {
+    mode: def.mode ?? 'mutation',
+    table: def.table,
+    ops,
+    batch,
+  }) as unknown as OnChangeDefinition<M>
 }
 
 /** Whether a unit name is valid: 1 to 64 letters, digits and `_`, starting with a letter. */
