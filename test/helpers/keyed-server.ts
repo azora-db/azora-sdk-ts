@@ -43,8 +43,20 @@ export class KeyedServer {
     if (signal.aborted) return Promise.reject(signal.reason as Error)
     let up = true
     // The two ends of the wire: what one sends, the other receives.
-    const client: Transport = { send: (f) => deliver(server, f), close: () => end(), onFrame: () => {}, onClose: () => {}, bufferedAmount: 0 }
-    const server: Transport = { send: (f) => deliver(client, f), close: () => end(), onFrame: (f) => handshake(f), onClose: () => {}, bufferedAmount: 0 }
+    const client: Transport = {
+      send: (f) => deliver(server, f),
+      close: () => end(),
+      onFrame: () => {},
+      onClose: () => {},
+      bufferedAmount: 0,
+    }
+    const server: Transport = {
+      send: (f) => deliver(client, f),
+      close: () => end(),
+      onFrame: (f) => handshake(f),
+      onClose: () => {},
+      bufferedAmount: 0,
+    }
     const deliver = (to: Transport, f: Uint8Array): void => {
       if (!up) throw new ConnectionError('fake: closed')
       const copy = f.slice()
@@ -70,7 +82,10 @@ export class KeyedServer {
         return
       }
       const hs = new HandshakeState({
-        pattern: 'IK', initiator: false, prologue: Uint8Array.of(...preamble, ...new TextEncoder().encode('azora-rt/1')), s: this.keys,
+        pattern: 'IK',
+        initiator: false,
+        prologue: Uint8Array.of(...preamble, ...new TextEncoder().encode('azora-rt/1')),
+        s: this.keys,
       })
       hs.readMessage(first.subarray(preamble.length))
       server.send(Uint8Array.of(0, ...hs.writeMessage()))
@@ -80,17 +95,45 @@ export class KeyedServer {
         const m = decode(raw)
         if (m.type === MsgType.Hello) {
           this.accepted++
-          ch.send(encode({
-            type: MsgType.Welcome, sessionId: `s${this.accepted}`, serverTimeMs: Date.now(), heartbeatMs: 15_000, maxMessage: 16 << 20,
-            principal: m.credential, scopes: ['read'], maxSubscriptions: 100,
-          }))
+          ch.send(
+            encode({
+              type: MsgType.Welcome,
+              sessionId: `s${this.accepted}`,
+              serverTimeMs: Date.now(),
+              heartbeatMs: 15_000,
+              maxMessage: 16 << 20,
+              principal: m.credential,
+              scopes: ['read'],
+              maxSubscriptions: 100,
+            }),
+          )
         } else if (m.type === MsgType.Query) {
-          ch.send(encode({
-            type: MsgType.Result, reqId: m.reqId, columns: ['v'], rows: [[m.sql]], truncated: false, rowsAffected: 0, lastInsertId: 0, replayed: false,
-          }))
+          ch.send(
+            encode({
+              type: MsgType.Result,
+              reqId: m.reqId,
+              columns: ['v'],
+              rows: [[m.sql]],
+              truncated: false,
+              rowsAffected: 0,
+              lastInsertId: 0,
+              replayed: false,
+            }),
+          )
         } else if (m.type === MsgType.Call) {
           // A unit that returns its arguments.
-          ch.send(encode({ type: MsgType.Returned, reqId: m.reqId, ok: true, value: m.args, replayed: false, errCode: '', errMessage: '', errData: '' }))
+          ch.send(
+            encode({
+              type: MsgType.Returned,
+              reqId: m.reqId,
+              ok: true,
+              value: m.args,
+              replayed: false,
+              errCode: '',
+              errMessage: '',
+              errData: '',
+            }),
+          )
         }
       }
       ch.start(keys.send, keys.recv, [], null)
