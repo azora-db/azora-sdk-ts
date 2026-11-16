@@ -6,8 +6,26 @@
 
 const TYPES = new Set(['string', 'number', 'integer', 'boolean', 'null', 'object', 'array'])
 const KEYS = new Set([
-  'type', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const', 'anyOf', 'minimum', 'maximum', 'minLength', 'maxLength',
-  'minItems', 'maxItems', 'pattern', 'description', 'title', 'default', '$schema', 'examples',
+  'type',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items',
+  'enum',
+  'const',
+  'anyOf',
+  'minimum',
+  'maximum',
+  'minLength',
+  'maxLength',
+  'minItems',
+  'maxItems',
+  'pattern',
+  'description',
+  'title',
+  'default',
+  '$schema',
+  'examples',
 ])
 const MAX_DEPTH = 32
 
@@ -43,16 +61,34 @@ function compile(v: unknown, path: string, depth: number): Schema {
   if (depth > MAX_DEPTH) throw new Error(`args schema: nested deeper than ${MAX_DEPTH}`)
   const where = path === '' ? 'args' : path
   const s: Schema = {
-    types: [], properties: null, required: [], addl: null, noAddl: false, items: null, enum: null, hasConst: false, constant: undefined, anyOf: null,
-    minimum: null, maximum: null, minLength: null, maxLength: null, minItems: null, maxItems: null, pattern: null, patternText: '',
+    types: [],
+    properties: null,
+    required: [],
+    addl: null,
+    noAddl: false,
+    items: null,
+    enum: null,
+    hasConst: false,
+    constant: undefined,
+    anyOf: null,
+    minimum: null,
+    maximum: null,
+    minLength: null,
+    maxLength: null,
+    minItems: null,
+    maxItems: null,
+    pattern: null,
+    patternText: '',
   }
   if (typeof v === 'boolean') {
     if (v) return s
     throw new Error(`args schema ${where}: false schemas are not supported`)
   }
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error(`args schema ${where}: must be an object`)
+  if (typeof v !== 'object' || v === null || Array.isArray(v))
+    throw new Error(`args schema ${where}: must be an object`)
   const m = v as Record<string, unknown>
-  for (const k of Object.keys(m)) if (!KEYS.has(k)) throw new Error(`args schema ${where}: unsupported keyword ${JSON.stringify(k)}`)
+  for (const k of Object.keys(m))
+    if (!KEYS.has(k)) throw new Error(`args schema ${where}: unsupported keyword ${JSON.stringify(k)}`)
   const t = m['type']
   if (typeof t === 'string') s.types = [t]
   else if (Array.isArray(t)) {
@@ -60,11 +96,13 @@ function compile(v: unknown, path: string, depth: number): Schema {
       if (typeof x !== 'string') throw new Error(`args schema ${where}: type must be a string or a list of strings`)
       s.types.push(x)
     }
-  } else if (t !== undefined && t !== null) throw new Error(`args schema ${where}: type must be a string or a list of strings`)
+  } else if (t !== undefined && t !== null)
+    throw new Error(`args schema ${where}: type must be a string or a list of strings`)
   for (const x of s.types) if (!TYPES.has(x)) throw new Error(`args schema ${where}: unknown type ${JSON.stringify(x)}`)
   if ('properties' in m) {
     const p = m['properties']
-    if (typeof p !== 'object' || p === null || Array.isArray(p)) throw new Error(`args schema ${where}: properties must be an object`)
+    if (typeof p !== 'object' || p === null || Array.isArray(p))
+      throw new Error(`args schema ${where}: properties must be an object`)
     s.properties = new Map()
     for (const [k, sub] of Object.entries(p)) s.properties.set(k, compile(sub, `${path}.${k}`, depth + 1))
   }
@@ -90,7 +128,8 @@ function compile(v: unknown, path: string, depth: number): Schema {
   }
   if ('anyOf' in m) {
     const list = m['anyOf']
-    if (!Array.isArray(list) || list.length === 0) throw new Error(`args schema ${where}: anyOf must be a non-empty list`)
+    if (!Array.isArray(list) || list.length === 0)
+      throw new Error(`args schema ${where}: anyOf must be a non-empty list`)
     s.anyOf = list.map((sub, i) => compile(sub, `${path}|${i}`, depth + 1))
   }
   const num = (k: string): number | null => {
@@ -101,7 +140,8 @@ function compile(v: unknown, path: string, depth: number): Schema {
   const count = (k: string): number | null => {
     if (!(k in m)) return null
     const n = m[k]
-    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 2 ** 31) throw new Error(`args schema ${where}: ${k} must be a non-negative integer`)
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 2 ** 31)
+      throw new Error(`args schema ${where}: ${k} must be a non-negative integer`)
     return n
   }
   s.minimum = num('minimum')
@@ -142,7 +182,10 @@ function compact(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(compact).join(',')}]`
   if (typeof v === 'object' && v !== null) {
     const o = v as Record<string, unknown>
-    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${compact(o[k])}`).join(',')}}`
+    return `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${compact(o[k])}`)
+      .join(',')}}`
   }
   return JSON.stringify(v) ?? 'null'
 }
@@ -168,7 +211,8 @@ export function validate(s: Schema | null, v: unknown, path = 'args'): string | 
   if (!s) return null
   if (s.types.length > 0) {
     const t = jsonType(v)
-    if (!s.types.some((want) => want === t || (want === 'number' && t === 'integer'))) return `${path}: must be ${s.types.join(' or ')}, got ${t}`
+    if (!s.types.some((want) => want === t || (want === 'number' && t === 'integer')))
+      return `${path}: must be ${s.types.join(' or ')}, got ${t}`
   }
   if (s.hasConst && !equal(v, s.constant)) return `${path}: must be ${compact(s.constant)}`
   if (s.enum && !s.enum.some((e) => equal(v, e))) return `${path}: must be one of ${s.enum.map(compact).join(', ')}`
