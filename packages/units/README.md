@@ -56,13 +56,13 @@ Every named export made with one of the helpers is a unit, named after the
 export (1 to 64 letters, digits and `_`, starting with a letter). Other
 exports are ignored.
 
-| Helper | Runs | `ctx.db` | `ctx.fetch` |
-|---|---|---|---|
-| `query({ args?, handler })` | one read transaction, a consistent snapshot | reads | no |
-| `mutation({ args?, handler })` | one write transaction, exactly once per mutation id | reads and writes | no |
-| `action({ args?, handler })` | no implicit transaction; `ctx.db.tx(fn)` groups writes | reads and writes | yes |
-| `schedule({ cron \| every, mode?, handler })` | on a schedule, as a mutation (default) or an action | | with `mode: 'action'` |
-| `onChange({ table, ops?, batch?, mode?, handler })` | with the rows that changed in a table | | with `mode: 'action'` |
+| Helper                                              | Runs                                                   | `ctx.db`         | `ctx.fetch`           |
+| --------------------------------------------------- | ------------------------------------------------------ | ---------------- | --------------------- |
+| `query({ args?, handler })`                         | one read transaction, a consistent snapshot            | reads            | no                    |
+| `mutation({ args?, handler })`                      | one write transaction, exactly once per mutation id    | reads and writes | no                    |
+| `action({ args?, handler })`                        | no implicit transaction; `ctx.db.tx(fn)` groups writes | reads and writes | yes                   |
+| `schedule({ cron \| every, mode?, handler })`       | on a schedule, as a mutation (default) or an action    |                  | with `mode: 'action'` |
+| `onChange({ table, ops?, batch?, mode?, handler })` | with the rows that changed in a table                  |                  | with `mode: 'action'` |
 
 `query`, `mutation` and `action` also take `internal: true` (clients cannot
 call it; other units can, with `ctx.run`), `access` and `description`
@@ -78,17 +78,32 @@ token included, so the handler must check `ctx.auth` itself:
 export const checkout = mutation({
   access: 'any', // customers hold read-only tokens
   args: { cartId: v.string() },
-  handler(ctx, { cartId }) { /* is this cart ctx.auth.subject's? */ },
+  handler(ctx, { cartId }) {
+    /* is this cart ctx.auth.subject's? */
+  },
 })
 ```
 
 ```ts
-export const nightly = schedule({ cron: '0 3 * * *', handler: (ctx) => { /* ... */ } })
-export const sync = schedule({ every: '5m', mode: 'action', handler: async (ctx) => { /* ctx.fetch(...) */ } })
+export const nightly = schedule({
+  cron: '0 3 * * *',
+  handler: (ctx) => {
+    /* ... */
+  },
+})
+export const sync = schedule({
+  every: '5m',
+  mode: 'action',
+  handler: async (ctx) => {
+    /* ctx.fetch(...) */
+  },
+})
 export const paid = onChange<Order>({
-  table: 'orders', ops: ['update'],
+  table: 'orders',
+  ops: ['update'],
   handler: (ctx, { changes, gap }) => {
-    for (const c of changes) if (c.new?.status === 'paid') ctx.db.exec('INSERT INTO audit(what) VALUES (?)', `paid ${c.new.id}`)
+    for (const c of changes)
+      if (c.new?.status === 'paid') ctx.db.exec('INSERT INTO audit(what) VALUES (?)', `paid ${c.new.id}`)
   },
 })
 ```
@@ -117,22 +132,22 @@ JSON Schema the validators produce before the unit runs and answers
 `invalid` when they do not match. Without `args` the unit accepts
 anything.
 
-| Validator | TypeScript | JSON Schema |
-|---|---|---|
-| `v.string({ min?, max?, pattern? })` | `string` | `{type: "string", minLength, maxLength, pattern}` |
-| `v.number({ min?, max? })` | `number` | `{type: "number", minimum, maximum}` |
-| `v.int({ min?, max? })` | `number` | `{type: "integer", minimum, maximum}` |
-| `v.boolean()`, `v.null()` | `boolean`, `null` | `{type: "boolean"}`, `{type: "null"}` |
-| `v.literal('paid')` | `'paid'` | `{const: "paid"}` |
-| `v.enum(['open', 'paid'])` | `'open' \| 'paid'` | `{enum: [...]}` |
-| `v.array(item, { min?, max? })` | `T[]` | `{type: "array", items, minItems, maxItems}` |
-| `v.object({ ... })` | `{ ... }` | `{type: "object", properties, required, additionalProperties: false}` |
-| `v.record(value)` | `Record<string, T>` | `{type: "object", additionalProperties: value}` |
-| `v.optional(x)` | an optional key | `x`, left out of `required` |
-| `v.nullable(x)` | `T \| null` | `{anyOf: [x, {type: "null"}]}` |
-| `v.union(a, b, ...)` | `A \| B` | `{anyOf: [...]}` |
-| `v.any()` | `any` | `{}` |
-| `v.bytes()` | `Uint8Array` | `{type: "object", properties: {$bytes: {type: "string"}}, required: ["$bytes"]}` |
+| Validator                            | TypeScript          | JSON Schema                                                                      |
+| ------------------------------------ | ------------------- | -------------------------------------------------------------------------------- |
+| `v.string({ min?, max?, pattern? })` | `string`            | `{type: "string", minLength, maxLength, pattern}`                                |
+| `v.number({ min?, max? })`           | `number`            | `{type: "number", minimum, maximum}`                                             |
+| `v.int({ min?, max? })`              | `number`            | `{type: "integer", minimum, maximum}`                                            |
+| `v.boolean()`, `v.null()`            | `boolean`, `null`   | `{type: "boolean"}`, `{type: "null"}`                                            |
+| `v.literal('paid')`                  | `'paid'`            | `{const: "paid"}`                                                                |
+| `v.enum(['open', 'paid'])`           | `'open' \| 'paid'`  | `{enum: [...]}`                                                                  |
+| `v.array(item, { min?, max? })`      | `T[]`               | `{type: "array", items, minItems, maxItems}`                                     |
+| `v.object({ ... })`                  | `{ ... }`           | `{type: "object", properties, required, additionalProperties: false}`            |
+| `v.record(value)`                    | `Record<string, T>` | `{type: "object", additionalProperties: value}`                                  |
+| `v.optional(x)`                      | an optional key     | `x`, left out of `required`                                                      |
+| `v.nullable(x)`                      | `T \| null`         | `{anyOf: [x, {type: "null"}]}`                                                   |
+| `v.union(a, b, ...)`                 | `A \| B`            | `{anyOf: [...]}`                                                                 |
+| `v.any()`                            | `any`               | `{}`                                                                             |
+| `v.bytes()`                          | `Uint8Array`        | `{type: "object", properties: {$bytes: {type: "string"}}, required: ["$bytes"]}` |
 
 Every validator takes `description`. A `pattern` given as a `RegExp` is
 sent as its source (flags are dropped); the engine evaluates it, so keep to
@@ -165,15 +180,16 @@ ctx.request                  // the HTTP request when called over plain HTTP, el
 file a mutation stores or deletes is part of its transaction.
 
 ```ts
-const f = ctx.storage.stat(id)                 // { id, bucket, path, name, contentType, size, sha256, metadata, createdAt } | null
-ctx.storage.statPath('invoices/7.pdf')         // by path (second argument: the bucket)
-ctx.storage.read(id); ctx.storage.text(id)     // Uint8Array, or UTF-8 text
-ctx.storage.url(id, { ttl: 300, download: 'invoice.pdf' })   // a signed download link
+const f = ctx.storage.stat(id) // { id, bucket, path, name, contentType, size, sha256, metadata, createdAt } | null
+ctx.storage.statPath('invoices/7.pdf') // by path (second argument: the bucket)
+ctx.storage.read(id)
+ctx.storage.text(id) // Uint8Array, or UTF-8 text
+ctx.storage.url(id, { ttl: 300, download: 'invoice.pdf' }) // a signed download link
 // mutations and actions:
 ctx.db.exec('UPDATE users SET avatar = ? WHERE id = ?', ctx.storage.upload(bytes, { name: 'a.png' }), id)
-ctx.storage.put('report text', { path: 'reports/q3.txt' })   // a file on its own, kept until deleted
-ctx.storage.delete(id, { force: true })                       // false when there was none
-ctx.storage.uploadUrl({ bucket: 'avatars', max_size: 2 << 20 }, { ttl: 300 })   // { url, expiresAt }: lets the caller upload
+ctx.storage.put('report text', { path: 'reports/q3.txt' }) // a file on its own, kept until deleted
+ctx.storage.delete(id, { force: true }) // false when there was none
+ctx.storage.uploadUrl({ bucket: 'avatars', max_size: 2 << 20 }, { ttl: 300 }) // { url, expiresAt }: lets the caller upload
 ```
 
 `upload` returns a value for one statement argument: the file is stored in
@@ -192,9 +208,10 @@ export const stripeWebhook = mutation({
   handler(ctx, event: { type: string }) {
     const r = ctx.request! // { method, path, query, headers, body, bytes, ip }
     const want = ctx.crypto.hmac(ctx.env['STRIPE_SECRET'] ?? '', r.body)
-    if (!ctx.crypto.timingSafeEqual(want, r.headers['x-signature'] ?? '')) throw new UnitError('permission_denied', 'bad signature')
+    if (!ctx.crypto.timingSafeEqual(want, r.headers['x-signature'] ?? ''))
+      throw new UnitError('permission_denied', 'bad signature')
     ctx.db.exec('INSERT INTO events(type) VALUES (?)', event.type)
-    return httpResponse('ok', { status: 200 })   // or return data: sent as JSON with status 200
+    return httpResponse('ok', { status: 200 }) // or return data: sent as JSON with status 200
   },
 })
 ```
@@ -241,7 +258,13 @@ export const pay = mutation({
   },
 })
 
-export const remindUnpaid = action({ internal: true, args: { orderId: v.number() }, handler: async (ctx, { orderId }) => { /* ctx.fetch(...) */ } })
+export const remindUnpaid = action({
+  internal: true,
+  args: { orderId: v.number() },
+  handler: async (ctx, { orderId }) => {
+    /* ctx.fetch(...) */
+  },
+})
 ```
 
 - In a mutation the job is written in its transaction: if the mutation
@@ -268,7 +291,7 @@ import type { Scheduler } from '@azora-db/units'
 type Units = typeof import('./index.ts')
 
 const scheduler = ctx.scheduler as Scheduler<Units>
-const id: string = scheduler.after(60_000, 'remindUnpaid', { orderId })   // a typo or wrong args: a type error
+const id: string = scheduler.after(60_000, 'remindUnpaid', { orderId }) // a typo or wrong args: a type error
 ```
 
 Annotate the id (`const id: string`) when it flows into the handler's
@@ -291,30 +314,33 @@ import * as units from '../units/index.ts'
 
 test('checkout', async () => {
   const t = createTestEnv(units, {
-    schema: ['CREATE TABLE carts(id TEXT PRIMARY KEY, customer INTEGER, total REAL)', "INSERT INTO carts VALUES ('c1', 42, 20)", /* ... */],
+    schema: [
+      'CREATE TABLE carts(id TEXT PRIMARY KEY, customer INTEGER, total REAL)',
+      "INSERT INTO carts VALUES ('c1', 42, 20)" /* ... */,
+    ],
     auth: { kind: 'token', subject: 'user:42', claims: { plan: 'pro' } },
     env: { STRIPE_KEY: 'sk_test' },
   })
-  const { orderId } = await t.call('checkout', { cartId: 'c1' })      // typed from the module
+  const { orderId } = await t.call('checkout', { cartId: 'c1' }) // typed from the module
   assert.deepEqual(t.db.all('SELECT customer FROM orders WHERE id = ?', orderId), [{ customer: 42 }])
   await assert.rejects(t.call('checkout', { cartId: 'c1' }), (e) => e instanceof UnitError && e.code === 'not_found')
-  await t.advance(24 * 3600e3)                                        // the fake clock: due jobs run
+  await t.advance(24 * 3600e3) // the fake clock: due jobs run
 })
 ```
 
-| | |
-|---|---|
-| `createTestEnv(units, options?)` | `schema` (SQL run first; a string may hold several statements), `auth` (the caller: `kind`, `principal`, `subject`, `scopes`, `tables`, `claims`; default an API key `key:test` with read and write), `env` (secrets), `fetch` (what `ctx.fetch` uses), `now` (the clock's start), `random` (bytes for ids, `ctx.uuid`, `randomBytes`), `jobAttempts`, `limits`, `onLog`. The definitions are checked as a deploy checks them. |
-| `t.call(name, args?, { auth?, as?, mutationId? })` | calls as `db.call` does: arguments and result through JSON (blobs as `Uint8Array`), a thrown `UnitError` rejects with `@azora-db/client`'s `UnitError`, a failure around the unit (no such unit, internal unit, arguments that do not match) with its `AzoraError` and the engine's message. `as: 'cli'` calls like `azora-units call` (internal units allowed, trigger `cli`), `as: 'admin'` like the dashboard. A `mutationId` given twice replays the first result. |
-| `t.units.<name>(args)` | the same, like `db.units` |
-| `t.db.all/one/value/exec`, `t.db.raw` | the database, to set up and inspect state (no SQL check) |
-| `t.jobs({ state?, unit? })`, `t.runJobs()`, `t.advance(ms)`, `t.now()` | jobs, as `azora-units jobs` shows them; run the due ones; move the clock, running each job when it falls due (retries included) |
-| `t.cancelJob(id)`, `t.retryJob(id)` | as `azora-units jobs cancel` / `retry` |
-| `t.runSchedule(name)`, `t.change(name, changes, { gap? })` | run a schedule, or an onChange unit with `[{ op, new?, old?, key? }]` (`key` defaults to the row's primary key) |
-| `t.request(name, { method?, path?, query?, headers?, body?, auth?, ip? })` | an HTTP request to a unit that declares `http`, answered as the server answers it: `{ status, headers, body, bytes, json() }`. Without `auth` the request has no credential |
-| `t.storage.put/stat/read/text/list` | the files `ctx.storage` sees: seed them before a call, look at them after |
-| `t.runs({ unit?, status? })`, `t.logs({ unit? })` | the run log (oldest first, with `rejected` runs) and the `ctx.log` lines |
-| `t.close()` | closes the database |
+|                                                                            |                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createTestEnv(units, options?)`                                           | `schema` (SQL run first; a string may hold several statements), `auth` (the caller: `kind`, `principal`, `subject`, `scopes`, `tables`, `claims`; default an API key `key:test` with read and write), `env` (secrets), `fetch` (what `ctx.fetch` uses), `now` (the clock's start), `random` (bytes for ids, `ctx.uuid`, `randomBytes`), `jobAttempts`, `limits`, `onLog`. The definitions are checked as a deploy checks them.                                         |
+| `t.call(name, args?, { auth?, as?, mutationId? })`                         | calls as `db.call` does: arguments and result through JSON (blobs as `Uint8Array`), a thrown `UnitError` rejects with `@azora-db/client`'s `UnitError`, a failure around the unit (no such unit, internal unit, arguments that do not match) with its `AzoraError` and the engine's message. `as: 'cli'` calls like `azora-units call` (internal units allowed, trigger `cli`), `as: 'admin'` like the dashboard. A `mutationId` given twice replays the first result. |
+| `t.units.<name>(args)`                                                     | the same, like `db.units`                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `t.db.all/one/value/exec`, `t.db.raw`                                      | the database, to set up and inspect state (no SQL check)                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `t.jobs({ state?, unit? })`, `t.runJobs()`, `t.advance(ms)`, `t.now()`     | jobs, as `azora-units jobs` shows them; run the due ones; move the clock, running each job when it falls due (retries included)                                                                                                                                                                                                                                                                                                                                        |
+| `t.cancelJob(id)`, `t.retryJob(id)`                                        | as `azora-units jobs cancel` / `retry`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `t.runSchedule(name)`, `t.change(name, changes, { gap? })`                 | run a schedule, or an onChange unit with `[{ op, new?, old?, key? }]` (`key` defaults to the row's primary key)                                                                                                                                                                                                                                                                                                                                                        |
+| `t.request(name, { method?, path?, query?, headers?, body?, auth?, ip? })` | an HTTP request to a unit that declares `http`, answered as the server answers it: `{ status, headers, body, bytes, json() }`. Without `auth` the request has no credential                                                                                                                                                                                                                                                                                            |
+| `t.storage.put/stat/read/text/list`                                        | the files `ctx.storage` sees: seed them before a call, look at them after                                                                                                                                                                                                                                                                                                                                                                                              |
+| `t.runs({ unit?, status? })`, `t.logs({ unit? })`                          | the run log (oldest first, with `rejected` runs) and the `ctx.log` lines                                                                                                                                                                                                                                                                                                                                                                                               |
+| `t.close()`                                                                | closes the database                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 **What is emulated**, following the engine's code: query, mutation and
 action transactions (a query cannot write, a mutation rolls back when it
@@ -383,20 +409,20 @@ from `.env` in the current directory (`--env-file <path>` for another
 file; the environment wins). Every command needs an API key with the
 `ddl` (or `admin`) scope. `--json` prints JSON.
 
-| Command | |
-|---|---|
-| `publish [dir] [--dry-run] [--note text]` | bundles `dir` (default `units`) and publishes it as a new version; the same bundle twice makes no new version; `--dry-run` checks it on the server |
-| `dev [dir]` | publishes, then publishes again on every save (debounced) |
-| `build [dir] --out <file>` | writes the bundle to a file and its source map to `<file>.map`, without a server: an artifact for `azora units deploy <database> <file>` (the engine's own CLI) or the admin API |
-| `list` | the active version's units |
-| `history [--limit n]` | the deploy history |
-| `rollback <version>` | makes an earlier version active again |
-| `call <unit> [json]` | calls a unit as you, internal ones too, and prints the result |
-| `logs [--follow] [--unit name] [--status s] [--limit n]` | the run log, oldest first, with each run's trigger (`call`, `schedule`, `change`, `job`, `admin`, `cli`, `mcp`) and principal; `--status` is `ok`, `error`, `replayed` or `rejected` (refused before the unit ran: arguments that do not match, an internal unit called by a client), shown apart from errors; `--follow` keeps printing new runs |
-| `jobs [--state pending\|failed] [--unit name] [--limit n]` | jobs scheduled with `ctx.scheduler`: waiting ones (when due) first, then failed ones (when they failed, and why) |
-| `jobs cancel <id>` / `jobs retry <id>` | remove a job, waiting or failed; run a failed job again now, its attempts reset |
-| `secrets list` / `secrets set <name> [value]` / `secrets unset <name>` | secrets units read as `ctx.env.NAME`; without a value, `set` reads it from stdin |
-| `types --go <dir> [--package name] [--remote] [units dir]` | Go argument structs and typed wrappers, from the units' schemas |
+| Command                                                                |                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publish [dir] [--dry-run] [--note text]`                              | bundles `dir` (default `units`) and publishes it as a new version; the same bundle twice makes no new version; `--dry-run` checks it on the server                                                                                                                                                                                                |
+| `dev [dir]`                                                            | publishes, then publishes again on every save (debounced)                                                                                                                                                                                                                                                                                         |
+| `build [dir] --out <file>`                                             | writes the bundle to a file and its source map to `<file>.map`, without a server: an artifact for `azora units deploy <database> <file>` (the engine's own CLI) or the admin API                                                                                                                                                                  |
+| `list`                                                                 | the active version's units                                                                                                                                                                                                                                                                                                                        |
+| `history [--limit n]`                                                  | the deploy history                                                                                                                                                                                                                                                                                                                                |
+| `rollback <version>`                                                   | makes an earlier version active again                                                                                                                                                                                                                                                                                                             |
+| `call <unit> [json]`                                                   | calls a unit as you, internal ones too, and prints the result                                                                                                                                                                                                                                                                                     |
+| `logs [--follow] [--unit name] [--status s] [--limit n]`               | the run log, oldest first, with each run's trigger (`call`, `schedule`, `change`, `job`, `admin`, `cli`, `mcp`) and principal; `--status` is `ok`, `error`, `replayed` or `rejected` (refused before the unit ran: arguments that do not match, an internal unit called by a client), shown apart from errors; `--follow` keeps printing new runs |
+| `jobs [--state pending\|failed] [--unit name] [--limit n]`             | jobs scheduled with `ctx.scheduler`: waiting ones (when due) first, then failed ones (when they failed, and why)                                                                                                                                                                                                                                  |
+| `jobs cancel <id>` / `jobs retry <id>`                                 | remove a job, waiting or failed; run a failed job again now, its attempts reset                                                                                                                                                                                                                                                                   |
+| `secrets list` / `secrets set <name> [value]` / `secrets unset <name>` | secrets units read as `ctx.env.NAME`; without a value, `set` reads it from stdin                                                                                                                                                                                                                                                                  |
+| `types --go <dir> [--package name] [--remote] [units dir]`             | Go argument structs and typed wrappers, from the units' schemas                                                                                                                                                                                                                                                                                   |
 
 `types --go` writes `<dir>/units.go`, with one wrapper per callable unit
 around `azora.Call[R]` of
