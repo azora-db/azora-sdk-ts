@@ -40,13 +40,27 @@ export class FakeConn {
       if (m.type !== MsgType.Hello) throw new Error('expected Hello first')
       const refuse = this.server.refuseHello?.(m.credential)
       if (refuse) {
-        this.send({ type: MsgType.Error, reqId: 0, code: refuse, message: 'unknown database or invalid credential', fatal: true, retryAfterMs: 0 })
+        this.send({
+          type: MsgType.Error,
+          reqId: 0,
+          code: refuse,
+          message: 'unknown database or invalid credential',
+          fatal: true,
+          retryAfterMs: 0,
+        })
         queueMicrotask(() => this.drop())
         return
       }
       this.send({
-        type: MsgType.Welcome, sessionId: `s${this.server.accepted}`, serverTimeMs: Date.now(), heartbeatMs: this.server.heartbeatMs,
-        maxMessage: 16 << 20, principal: 'test', scopes: ['read', 'write'], maxSubscriptions: 100, txIdleMs: this.server.txIdleMs,
+        type: MsgType.Welcome,
+        sessionId: `s${this.server.accepted}`,
+        serverTimeMs: Date.now(),
+        heartbeatMs: this.server.heartbeatMs,
+        maxMessage: 16 << 20,
+        principal: 'test',
+        scopes: ['read', 'write'],
+        maxSubscriptions: 100,
+        txIdleMs: this.server.txIdleMs,
       })
       return
     }
