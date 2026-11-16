@@ -44,8 +44,8 @@ function Root() {
           <h1>Cannot reach the engine</h1>
           {error === 'missing' ? (
             <p>
-              Start a local engine first: run <code>pnpm dev:engine</code> in the SDK folder, then restart this dev server so it
-              reads <code>examples/.env</code>.
+              Start a local engine first: run <code>pnpm dev:engine</code> in the SDK folder, then restart this dev
+              server so it reads <code>examples/.env</code>.
             </p>
           ) : (
             <p>
