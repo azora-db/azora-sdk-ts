@@ -52,7 +52,10 @@ const SOURCE = /\.(m?[jt]s|tsx|jsx)$/
  * same bytes; an installed package ships `dist` only and uses its
  * `index.js`.
  */
-export function libraryEntry(moduleUrl: string = import.meta.url, exists: (path: string) => boolean = existsSync): string {
+export function libraryEntry(
+  moduleUrl: string = import.meta.url,
+  exists: (path: string) => boolean = existsSync,
+): string {
   const source = fileURLToPath(new URL('../src/index.ts', moduleUrl))
   return exists(source) ? source : fileURLToPath(new URL('./index.js', moduleUrl))
 }
@@ -62,7 +65,9 @@ const SELF = libraryEntry()
 /** The entry of a units directory: its index file, or all its source files. */
 export function findEntry(dir: string): { entry: string | null; files: string[] } {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {
-    throw new BundleError(`no units directory at ${dir}: create units/index.ts, or pass the directory (azora-units publish <dir>)`)
+    throw new BundleError(
+      `no units directory at ${dir}: create units/index.ts, or pass the directory (azora-units publish <dir>)`,
+    )
   }
   for (const f of INDEX) {
     const p = join(dir, f)
@@ -73,7 +78,8 @@ export function findEntry(dir: string): { entry: string | null; files: string[] 
     .sort()
     .map((f) => join(dir, f))
     .filter((p) => statSync(p).isFile())
-  if (files.length === 0) throw new BundleError(`no units in ${dir}: add an index.ts that exports query(), mutation(), ... definitions`)
+  if (files.length === 0)
+    throw new BundleError(`no units in ${dir}: add an index.ts that exports query(), mutation(), ... definitions`)
   return { entry: null, files }
 }
 
@@ -85,7 +91,11 @@ function show(p: string): string {
 
 function format(errors: readonly Message[], dir: string): string {
   return errors
-    .map((m) => (m.location ? `${show(resolve(dir, m.location.file))}:${m.location.line}:${m.location.column + 1}: ${m.text}` : m.text))
+    .map((m) =>
+      m.location
+        ? `${show(resolve(dir, m.location.file))}:${m.location.line}:${m.location.column + 1}: ${m.text}`
+        : m.text,
+    )
     .join('\n')
 }
 
@@ -170,7 +180,8 @@ export function evaluateBundle(bundle: string, timeoutMs = 5000): Record<string,
   const sandbox: Record<string, unknown> = {}
   runInNewContext(bundle, sandbox, { timeout: timeoutMs, filename: 'units.js' })
   const units = sandbox['__azora_units']
-  if (typeof units !== 'object' || units === null) throw new BundleError('the bundle did not set globalThis.__azora_units')
+  if (typeof units !== 'object' || units === null)
+    throw new BundleError('the bundle did not set globalThis.__azora_units')
   return units as Record<string, Record<string, unknown>>
 }
 
@@ -189,7 +200,8 @@ export function manifestOf(units: Record<string, Record<string, unknown>>): Mani
     if (d['http'] === true) u.http = 'auth'
     else if (d['http'] === 'public') u.http = 'public'
     if (d['kind'] === 'schedule') Object.assign(u, { cron: String(d['cron'] ?? ''), every: String(d['every'] ?? '') })
-    if (d['kind'] === 'onChange') Object.assign(u, { table: String(d['table']), ops: [...(d['ops'] as string[])], batch: Number(d['batch']) })
+    if (d['kind'] === 'onChange')
+      Object.assign(u, { table: String(d['table']), ops: [...(d['ops'] as string[])], batch: Number(d['batch']) })
     return u
   })
 }
