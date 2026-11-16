@@ -33,16 +33,39 @@ beforeEach(async () => {
       c.send({ type: MsgType.Subscribed, reqId: m.reqId, subId: m.subId })
       if (m.kind === 2) {
         c.send({
-          type: MsgType.Batch, subId: m.subId, snapshot: true, reset: true, checkpoint: 5, epoch: 1n, tables: [],
+          type: MsgType.Batch,
+          subId: m.subId,
+          snapshot: true,
+          reset: true,
+          checkpoint: 5,
+          epoch: 1n,
+          tables: [],
           changes: [{ seq: 0, table: 'tasks', tv: 1, op: Op.Insert, key: [1], new: [1, 'write tests'], old: null }],
         })
       }
     } else if (m.type === MsgType.Query) {
       queries++
-      c.send({ type: MsgType.Result, reqId: m.reqId, columns: ['n'], rows: [[queries]], truncated: false, rowsAffected: 0, lastInsertId: 0, replayed: false })
+      c.send({
+        type: MsgType.Result,
+        reqId: m.reqId,
+        columns: ['n'],
+        rows: [[queries]],
+        truncated: false,
+        rowsAffected: 0,
+        lastInsertId: 0,
+        replayed: false,
+      })
     }
   }
-  db = await connect({ database: 'app', allowPlaintext: true, apiKey: 'k', transport: server.transport, reconnectMinMs: 1, reconnectMaxMs: 5, onError: () => {} })
+  db = await connect({
+    database: 'app',
+    allowPlaintext: true,
+    apiKey: 'k',
+    transport: server.transport,
+    reconnectMinMs: 1,
+    reconnectMaxMs: 5,
+    onError: () => {},
+  })
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
@@ -60,13 +83,26 @@ function Tasks(props: { filter?: string }) {
   if (error) return <p>error: {error.message}</p>
   return (
     <div>
-      <p data-testid="state">{ready ? 'ready' : 'loading'} {connected ? 'online' : 'offline'} runs={count.rows?.[0]?.n ?? '-'}</p>
-      <ul>{rows.map((t) => <li key={t.id}>{t.title}</li>)}</ul>
+      <p data-testid="state">
+        {ready ? 'ready' : 'loading'} {connected ? 'online' : 'offline'} runs={count.rows?.[0]?.n ?? '-'}
+      </p>
+      <ul>
+        {rows.map((t) => (
+          <li key={t.id}>{t.title}</li>
+        ))}
+      </ul>
     </div>
   )
 }
 
-const render = (ui: React.ReactNode): Promise<void> => act(async () => root.render(<StrictMode><AzoraProvider db={db}>{ui}</AzoraProvider></StrictMode>))
+const render = (ui: React.ReactNode): Promise<void> =>
+  act(async () =>
+    root.render(
+      <StrictMode>
+        <AzoraProvider db={db}>{ui}</AzoraProvider>
+      </StrictMode>,
+    ),
+  )
 const items = (): string[] => [...host.querySelectorAll('li')].map((li) => li.textContent ?? '')
 const state = (): string => host.querySelector('[data-testid=state]')?.textContent ?? ''
 
@@ -80,7 +116,13 @@ test('hooks render live rows and follow changes, watches and reconnects', async 
   const live = subs.filter((s) => s.kind === 2).at(-1)!
   await act(async () => {
     server.last.send({
-      type: MsgType.Batch, subId: live.subId, snapshot: false, reset: false, checkpoint: 7, epoch: 1n, tables: [],
+      type: MsgType.Batch,
+      subId: live.subId,
+      snapshot: false,
+      reset: false,
+      checkpoint: 7,
+      epoch: 1n,
+      tables: [],
       changes: [
         { seq: 6, table: 'tasks', tv: 1, op: Op.Insert, key: [2], new: [2, 'ship it'], old: null },
         { seq: 7, table: 'tasks', tv: 1, op: Op.Update, key: [1], new: [1, 'write more tests'], old: null },
@@ -94,7 +136,16 @@ test('hooks render live rows and follow changes, watches and reconnects', async 
   const before = queries
   const watch = subs.filter((s) => s.kind === 5).at(-1)!
   await act(async () => {
-    server.last.send({ type: MsgType.Batch, subId: watch.subId, snapshot: false, reset: false, checkpoint: 8, epoch: 0n, tables: ['tasks'], changes: [] })
+    server.last.send({
+      type: MsgType.Batch,
+      subId: watch.subId,
+      snapshot: false,
+      reset: false,
+      checkpoint: 8,
+      epoch: 0n,
+      tables: ['tasks'],
+      changes: [],
+    })
     await until(() => queries > before, 'the query to run again')
   })
   expect(state()).toContain(`runs=${queries}`) // state updates are flushed when act returns
@@ -102,13 +153,24 @@ test('hooks render live rows and follow changes, watches and reconnects', async 
   // Changing the filter replaces the subscription.
   const opened = subs.filter((s) => s.kind === 2).length
   await render(<Tasks filter="id = 1" />)
-  await act(() => until(() => subs.filter((s) => s.kind === 2).length > opened && items().length === 1, 'the new subscription'))
+  await act(() =>
+    until(() => subs.filter((s) => s.kind === 2).length > opened && items().length === 1, 'the new subscription'),
+  )
   expect(subs.at(-1)?.where).toMatchObject({ op: '=', col: 'id', val: 1 })
   await until(() => server.last.received.some((m) => m.type === MsgType.Unsubscribe), 'the old subscription to end')
 })
 
 test('hooks need a provider, and report a failing query', async () => {
-  server.onMessage = (m, c) => m.type === MsgType.Subscribe && c.send({ type: MsgType.Error, reqId: m.reqId, code: 'permission_denied', message: 'not for you', fatal: false, retryAfterMs: 0 })
+  server.onMessage = (m, c) =>
+    m.type === MsgType.Subscribe &&
+    c.send({
+      type: MsgType.Error,
+      reqId: m.reqId,
+      code: 'permission_denied',
+      message: 'not for you',
+      fatal: false,
+      retryAfterMs: 0,
+    })
   function Denied() {
     const { error, ready } = useLiveQuery('secret')
     return <p>{error ? `error: ${error.message}` : ready ? 'ready' : 'loading'}</p>
@@ -132,19 +194,43 @@ test('useUnit calls on demand; useUnitQuery calls again when its arguments or wa
     calls++
     const args = JSON.parse(m.args || 'null') as { cartId?: string; customer?: number } | null
     if (m.unit === 'checkout' && args?.cartId === 'bad') {
-      c.send({ type: MsgType.Returned, reqId: m.reqId, ok: false, value: '', replayed: false, errCode: 'not_found', errMessage: 'no such cart', errData: '' })
+      c.send({
+        type: MsgType.Returned,
+        reqId: m.reqId,
+        ok: false,
+        value: '',
+        replayed: false,
+        errCode: 'not_found',
+        errMessage: 'no such cart',
+        errData: '',
+      })
     } else {
-      c.send({ type: MsgType.Returned, reqId: m.reqId, ok: true, value: JSON.stringify({ unit: m.unit, args, n: calls }), replayed: false, errCode: '', errMessage: '', errData: '' })
+      c.send({
+        type: MsgType.Returned,
+        reqId: m.reqId,
+        ok: true,
+        value: JSON.stringify({ unit: m.unit, args, n: calls }),
+        replayed: false,
+        errCode: '',
+        errMessage: '',
+        errData: '',
+      })
     }
   }
   let checkout: ReturnType<typeof useUnit<{ unit: string; n: number }, { cartId: string }>> | undefined
   function Shop(props: { customer: number }) {
     checkout = useUnit<{ unit: string; n: number }, { cartId: string }>('checkout')
-    const orders = useUnitQuery<{ args: { customer: number }; n: number }>('myOrders', { customer: props.customer }, [], { watch: ['orders'] })
+    const orders = useUnitQuery<{ args: { customer: number }; n: number }>(
+      'myOrders',
+      { customer: props.customer },
+      [],
+      { watch: ['orders'] },
+    )
     return (
       <p data-testid="state">
-        {checkout.pending ? 'pending' : 'idle'} {checkout.error ? `error=${checkout.error.message}` : `data=${checkout.data?.unit ?? '-'}`}
-        {' '}orders={orders.data ? `${orders.data.args.customer}#${orders.data.n}` : '-'}
+        {checkout.pending ? 'pending' : 'idle'}{' '}
+        {checkout.error ? `error=${checkout.error.message}` : `data=${checkout.data?.unit ?? '-'}`} orders=
+        {orders.data ? `${orders.data.args.customer}#${orders.data.n}` : '-'}
       </p>
     )
   }
@@ -170,9 +256,20 @@ test('useUnit calls on demand; useUnitQuery calls again when its arguments or wa
 
   // A watched table was written: it runs again.
   const before = calls
-  const watch = server.last.received.filter((m): m is Extract<Msg, { type: typeof MsgType.Subscribe }> => m.type === MsgType.Subscribe && m.kind === 5).at(-1)!
+  const watch = server.last.received
+    .filter((m): m is Extract<Msg, { type: typeof MsgType.Subscribe }> => m.type === MsgType.Subscribe && m.kind === 5)
+    .at(-1)!
   await act(async () => {
-    server.last.send({ type: MsgType.Batch, subId: watch.subId, snapshot: false, reset: false, checkpoint: 1, epoch: 0n, tables: ['orders'], changes: [] })
+    server.last.send({
+      type: MsgType.Batch,
+      subId: watch.subId,
+      snapshot: false,
+      reset: false,
+      checkpoint: 1,
+      epoch: 0n,
+      tables: ['orders'],
+      changes: [],
+    })
     await until(() => calls > before, 'the query to run again')
   })
   await act(() => until(() => state().endsWith(`orders=7#${calls}`), 'the new result'))
