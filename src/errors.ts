@@ -26,7 +26,11 @@ export class AzoraError extends Error {
   /** The HTTP status, for errors of the storage API. */
   readonly status?: number
 
-  constructor(code: ErrorCodeValue, message: string, o: { fatal?: boolean; retryAfterMs?: number; status?: number } = {}) {
+  constructor(
+    code: ErrorCodeValue,
+    message: string,
+    o: { fatal?: boolean; retryAfterMs?: number; status?: number } = {},
+  ) {
     super(`${code}: ${message}`)
     this.code = code
     this.fatal = o.fatal ?? false
