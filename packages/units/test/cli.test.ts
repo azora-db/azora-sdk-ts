@@ -9,7 +9,11 @@ import { loadEnv } from '../src/env.ts'
 const fixture = (name: string): string => new URL(`./fixtures/${name}`, import.meta.url).pathname
 
 /** An admin facade whose server is a function of (op, body). */
-function server(answer: (op: string, body: any) => unknown): { conn: Conn; ops: Array<[string, any]>; closed: () => number } {
+function server(answer: (op: string, body: any) => unknown): {
+  conn: Conn
+  ops: Array<[string, any]>
+  closed: () => number
+} {
   const ops: Array<[string, any]> = []
   let closed = 0
   const unitsAdmin = new UnitsAdmin(async (op, body) => {
@@ -45,7 +49,13 @@ describe('azora-units', () => {
     expect(out.lines[1]).toBe('  mutation  checkout    Pay for a cart')
     expect(s.closed()).toBe(1)
 
-    const dry = server(() => ({ version: 0, sha256: '', unchanged: false, dry_run: true, units: [unit, { ...unit, name: 'x', kind: 'schedule', cron: '0 3 * * *', internal: true, description: '' }] }))
+    const dry = server(() => ({
+      version: 0,
+      sha256: '',
+      unchanged: false,
+      dry_run: true,
+      units: [unit, { ...unit, name: 'x', kind: 'schedule', cron: '0 3 * * *', internal: true, description: '' }],
+    }))
     const o2 = io()
     expect(await main(['publish', fixture('shop'), '--dry-run'], o2, async () => dry.conn)).toBe(0)
     expect(dry.ops[0]![1].dry_run).toBe(true)
@@ -77,7 +87,13 @@ describe('azora-units', () => {
     expect(o.lines.at(-1)).toContain('azora units deploy <database>')
 
     // The same bytes as publish sends: the bundle is a build artifact.
-    const { conn, ops } = server(() => ({ version: 1, sha256: 'a'.repeat(64), unchanged: false, dry_run: false, units: [unit] }))
+    const { conn, ops } = server(() => ({
+      version: 1,
+      sha256: 'a'.repeat(64),
+      unchanged: false,
+      dry_run: false,
+      units: [unit],
+    }))
     expect(await main(['publish', fixture('shop')], io(), async () => conn)).toBe(0)
     expect(ops[0]?.[1].bundle).toBe(bundle)
 
@@ -100,12 +116,34 @@ describe('azora-units', () => {
 
   test('list, history, rollback', async () => {
     const s = server((op) => {
-      if (op === 'list') return { version: 2, units: [unit, { ...unit, name: 'audit', internal: true, description: '' }] }
+      if (op === 'list')
+        return { version: 2, units: [unit, { ...unit, name: 'audit', internal: true, description: '' }] }
       if (op === 'deploys') {
-        return { active: 2, deploys: [
-          { version: 2, at: Date.UTC(2026, 10, 10, 9, 30), by: 'key:ci', note: 'second', sha256: 'f'.repeat(64), size: 9000, units: 2, active: true },
-          { version: 1, at: Date.UTC(2026, 10, 9, 8, 0), by: 'key:ci', note: '', sha256: 'e'.repeat(64), size: 8000, units: ['checkout'], active: false },
-        ] }
+        return {
+          active: 2,
+          deploys: [
+            {
+              version: 2,
+              at: Date.UTC(2026, 10, 10, 9, 30),
+              by: 'key:ci',
+              note: 'second',
+              sha256: 'f'.repeat(64),
+              size: 9000,
+              units: 2,
+              active: true,
+            },
+            {
+              version: 1,
+              at: Date.UTC(2026, 10, 9, 8, 0),
+              by: 'key:ci',
+              note: '',
+              sha256: 'e'.repeat(64),
+              size: 8000,
+              units: ['checkout'],
+              active: false,
+            },
+          ],
+        }
       }
       if (op === 'activate') return { version: 1, units: [unit] }
       return {}
@@ -113,7 +151,11 @@ describe('azora-units', () => {
     const c = async (): Promise<Conn> => s.conn
     let out = io()
     await main(['list'], out, c)
-    expect(out.lines).toEqual(['Version 2 is active, with 2 units:', '  mutation  checkout            Pay for a cart', '  mutation  audit     internal'])
+    expect(out.lines).toEqual([
+      'Version 2 is active, with 2 units:',
+      '  mutation  checkout            Pay for a cart',
+      '  mutation  audit     internal',
+    ])
     out = io()
     await main(['history', '--limit', '5'], out, c)
     expect(s.ops.at(-1)).toEqual(['deploys', { limit: 5 }])
@@ -137,9 +179,11 @@ describe('azora-units', () => {
   })
 
   test('call prints the result, with blobs as {"$bytes"}; a unit error fails', async () => {
-    const s = server((_op, b) => (b.unit === 'boom'
-      ? { ok: false, value: null, error: { code: 'conflict', message: 'already paid', data: { order: 7 } } }
-      : { ok: true, value: { echo: b.args, blob: { $bytes: 'AAE=' } } }))
+    const s = server((_op, b) =>
+      b.unit === 'boom'
+        ? { ok: false, value: null, error: { code: 'conflict', message: 'already paid', data: { order: 7 } } }
+        : { ok: true, value: { echo: b.args, blob: { $bytes: 'AAE=' } } },
+    )
     const c = async (): Promise<Conn> => s.conn
     let out = io()
     expect(await main(['call', 'checkout', '{"cartId":"c1"}'], out, c)).toBe(0)
@@ -153,7 +197,10 @@ describe('azora-units', () => {
     expect(out.errors[0]).toBe('azora-units: unit boom threw conflict: already paid\ndata: {\n  "order": 7\n}')
     out = io()
     expect(await main(['call', 'boom', '--json'], out, c)).toBe(1)
-    expect(JSON.parse(out.lines.join('\n'))).toEqual({ ok: false, error: { code: 'conflict', message: 'already paid', data: { order: 7 } } })
+    expect(JSON.parse(out.lines.join('\n'))).toEqual({
+      ok: false,
+      error: { code: 'conflict', message: 'already paid', data: { order: 7 } },
+    })
     out = io()
     expect(await main(['call', 'x', '{bad'], out, c)).toBe(2)
     expect(out.errors[0]).toMatch(/the arguments are not JSON/)
@@ -163,10 +210,34 @@ describe('azora-units', () => {
     const at = Date.UTC(2026, 10, 10, 12, 0, 0)
     const s = server((op) => {
       if (op === 'runs') {
-        return { runs: [
-          { id: 2, at: at + 1000, unit: 'checkout', kind: 'mutation', trigger: 'call', principal: 'user:42', duration_ms: 3.456, status: 'error', error: 'not_found: no such cart', logs: '' },
-          { id: 1, at, unit: 'checkout', kind: 'mutation', trigger: 'call', principal: 'user:42', duration_ms: 2, status: 'ok', error: '', logs: 'info paid 7\nwarn low stock' },
-        ] }
+        return {
+          runs: [
+            {
+              id: 2,
+              at: at + 1000,
+              unit: 'checkout',
+              kind: 'mutation',
+              trigger: 'call',
+              principal: 'user:42',
+              duration_ms: 3.456,
+              status: 'error',
+              error: 'not_found: no such cart',
+              logs: '',
+            },
+            {
+              id: 1,
+              at,
+              unit: 'checkout',
+              kind: 'mutation',
+              trigger: 'call',
+              principal: 'user:42',
+              duration_ms: 2,
+              status: 'ok',
+              error: '',
+              logs: 'info paid 7\nwarn low stock',
+            },
+          ],
+        }
       }
       if (op === 'secrets.list') return { secrets: [{ name: 'STRIPE_KEY', updated_at: at }] }
       if (op === 'secrets.unset') return { removed: false }
@@ -202,11 +273,46 @@ describe('azora-units', () => {
 
   test('logs shows rejected calls apart from errors, with the trigger, and filters by status', async () => {
     const at = Date.UTC(2026, 10, 10, 12, 0, 0)
-    const s = server(() => ({ runs: [
-      { id: 3, at: at + 2000, unit: 'remind', kind: 'mutation', trigger: 'job', principal: 'job:job_abc', duration_ms: 1, status: 'ok', error: '', logs: '' },
-      { id: 2, at: at + 1000, unit: 'audit', kind: 'mutation', trigger: 'call', principal: 'user:42', duration_ms: 0, status: 'rejected', error: 'unit "audit" is internal: only other units can run it', logs: '' },
-      { id: 1, at, unit: 'checkout', kind: 'mutation', trigger: 'cli', principal: 'key:app', duration_ms: 2, status: 'error', error: 'failed: boom', logs: '' },
-    ] }))
+    const s = server(() => ({
+      runs: [
+        {
+          id: 3,
+          at: at + 2000,
+          unit: 'remind',
+          kind: 'mutation',
+          trigger: 'job',
+          principal: 'job:job_abc',
+          duration_ms: 1,
+          status: 'ok',
+          error: '',
+          logs: '',
+        },
+        {
+          id: 2,
+          at: at + 1000,
+          unit: 'audit',
+          kind: 'mutation',
+          trigger: 'call',
+          principal: 'user:42',
+          duration_ms: 0,
+          status: 'rejected',
+          error: 'unit "audit" is internal: only other units can run it',
+          logs: '',
+        },
+        {
+          id: 1,
+          at,
+          unit: 'checkout',
+          kind: 'mutation',
+          trigger: 'cli',
+          principal: 'key:app',
+          duration_ms: 2,
+          status: 'error',
+          error: 'failed: boom',
+          logs: '',
+        },
+      ],
+    }))
     const c = async (): Promise<Conn> => s.conn
     let out = io()
     expect(await main(['logs'], out, c)).toBe(0)
@@ -229,10 +335,35 @@ describe('azora-units', () => {
     const at = Date.UTC(2026, 10, 10, 12, 0, 0)
     const s = server((op) => {
       if (op === 'jobs') {
-        return { jobs: [
-          { id: 'job_aaaaaaaaaaaaaaaaaaaaaaaaaa', unit: 'remind', args: { cartId: 'c1' }, run_at: at + 3600e3, created_at: at, created_by: 'user:42', source: 'checkout', attempts: 0, state: 'pending' },
-          { id: 'job_bbbbbbbbbbbbbbbbbbbbbbbbbb', unit: 'sync', args: null, run_at: at + 60e3, created_at: at, created_by: 'system', source: 'nightly', attempts: 5, state: 'failed', error: 'failed: webhook answered 500\n  at handler (index.ts:3:9)' },
-        ], pending: 1, failed: 1 }
+        return {
+          jobs: [
+            {
+              id: 'job_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+              unit: 'remind',
+              args: { cartId: 'c1' },
+              run_at: at + 3600e3,
+              created_at: at,
+              created_by: 'user:42',
+              source: 'checkout',
+              attempts: 0,
+              state: 'pending',
+            },
+            {
+              id: 'job_bbbbbbbbbbbbbbbbbbbbbbbbbb',
+              unit: 'sync',
+              args: null,
+              run_at: at + 60e3,
+              created_at: at,
+              created_by: 'system',
+              source: 'nightly',
+              attempts: 5,
+              state: 'failed',
+              error: 'failed: webhook answered 500\n  at handler (index.ts:3:9)',
+            },
+          ],
+          pending: 1,
+          failed: 1,
+        }
       }
       if (op === 'jobs.cancel') return { removed: false }
       if (op === 'jobs.retry') return {}
@@ -252,7 +383,11 @@ describe('azora-units', () => {
     out = io()
     await main(['jobs', '--state', 'failed', '--unit', 'sync', '--limit', '5', '--json'], out, c)
     expect(s.ops.at(-1)).toEqual(['jobs', { limit: 5, state: 'failed', unit: 'sync' }])
-    expect(JSON.parse(out.lines.join('\n'))).toMatchObject({ pending: 1, failed: 1, jobs: [{ runAt: at + 3600e3, args: { cartId: 'c1' } }, { state: 'failed' }] })
+    expect(JSON.parse(out.lines.join('\n'))).toMatchObject({
+      pending: 1,
+      failed: 1,
+      jobs: [{ runAt: at + 3600e3, args: { cartId: 'c1' } }, { state: 'failed' }],
+    })
     out = io()
     expect(await main(['jobs', '--state', 'done'], out, c)).toBe(2)
     out = io()
@@ -299,13 +434,17 @@ describe('azora-units', () => {
     expect(await main(['publish', '--bogus'], out)).toBe(2)
     expect(out.errors[0]).toMatch(/Unknown option '--bogus'/)
 
-    expect(describeError(new AzoraError('permission_denied', 'scope ddl required'))).toMatch(/needs an API key with the ddl \(or admin\) scope/)
+    expect(describeError(new AzoraError('permission_denied', 'scope ddl required'))).toMatch(
+      /needs an API key with the ddl \(or admin\) scope/,
+    )
     expect(describeError(new AzoraError('unauthenticated', 'bad key'))).toMatch(/refused AZORA_TOKEN/)
     expect(describeError(new UnitError('u', 'invalid', 'nope'))).toBe('unit u threw invalid: nope')
     const denied = server(() => new AzoraError('permission_denied', 'unit admin needs the ddl scope'))
     out = io()
     expect(await main(['list'], out, async () => denied.conn)).toBe(1)
-    expect(out.errors[0]).toMatch(/permission_denied: unit admin needs the ddl scope\nManaging units needs an API key with the ddl/)
+    expect(out.errors[0]).toMatch(
+      /permission_denied: unit admin needs the ddl scope\nManaging units needs an API key with the ddl/,
+    )
   })
 })
 
