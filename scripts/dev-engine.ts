@@ -16,10 +16,10 @@ import { startEngine } from '../test/helpers/engine.ts'
 
 const engine = await startEngine({
   schema: [
-    'CREATE TABLE orders(id INTEGER PRIMARY KEY, customer INTEGER NOT NULL, status TEXT NOT NULL, total REAL NOT NULL, note TEXT, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')))',
+    "CREATE TABLE orders(id INTEGER PRIMARY KEY, customer INTEGER NOT NULL, status TEXT NOT NULL, total REAL NOT NULL, note TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))",
     'CREATE INDEX orders_status ON orders(status)',
     'CREATE TABLE accounts(id TEXT PRIMARY KEY, owner TEXT NOT NULL, balance INTEGER NOT NULL CHECK (balance >= 0))',
-    'CREATE TABLE transfers(id INTEGER PRIMARY KEY, src TEXT NOT NULL, dst TEXT NOT NULL, amount INTEGER NOT NULL, at TEXT NOT NULL DEFAULT (datetime(\'now\')))',
+    "CREATE TABLE transfers(id INTEGER PRIMARY KEY, src TEXT NOT NULL, dst TEXT NOT NULL, amount INTEGER NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')))",
     'CREATE TABLE documents(id INTEGER PRIMARY KEY, title TEXT NOT NULL, file FILE)',
     // The units example (examples/units): carts become orders; units write audit lines.
     'CREATE TABLE carts(id TEXT PRIMARY KEY, customer INTEGER NOT NULL, total REAL NOT NULL, note TEXT)',
@@ -31,7 +31,18 @@ const engine = await startEngine({
   publish: ['orders', 'accounts', 'transfers', 'files'],
   tokens: {
     // What a backend would mint for a signed-in customer: their own orders only.
-    customer42: ['--sub', 'user:42', '--scope', 'read', '--ttl', '12h', '--table', 'orders', '--filter', 'orders: customer = 42'],
+    customer42: [
+      '--sub',
+      'user:42',
+      '--scope',
+      'read',
+      '--ttl',
+      '12h',
+      '--table',
+      'orders',
+      '--filter',
+      'orders: customer = 42',
+    ],
     // The browser demo's token: read and write, 12 hours.
     web: ['--sub', 'demo:web', '--scope', 'read,write', '--ttl', '12h'],
   },
@@ -58,7 +69,9 @@ if (!Array.isArray(doc.features) || !doc.features.includes('units')) {
 } else {
   const db = await connect(url, { token: engine.apiKey })
   try {
-    const r = await publishUnits(db, fileURLToPath(new URL('../examples/units/units', import.meta.url)), { note: 'pnpm dev:engine' })
+    const r = await publishUnits(db, fileURLToPath(new URL('../examples/units/units', import.meta.url)), {
+      note: 'pnpm dev:engine',
+    })
     units = `Published examples/units as version ${r.version}: ${r.units.map((u) => u.name).join(', ')}.`
   } catch (e) {
     units = `Publishing examples/units failed: ${(e as Error).message}`
