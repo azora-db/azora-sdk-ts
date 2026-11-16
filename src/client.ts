@@ -7,7 +7,16 @@
 import type { ResolvedOptions } from './config.ts'
 import type { Discovery } from './discovery.ts'
 import {
-  AzoraError, ClosedError, ConnectionError, ErrorCode, HandshakeError, isPermanent, LostError, TimeoutError, TxExpiredError, UnknownOutcomeError,
+  AzoraError,
+  ClosedError,
+  ConnectionError,
+  ErrorCode,
+  HandshakeError,
+  isPermanent,
+  LostError,
+  TimeoutError,
+  TxExpiredError,
+  UnknownOutcomeError,
 } from './errors.ts'
 import { MsgType, type ErrorMsg, type Msg, type Result, type Returned, type Shape, type Signed } from './messages.ts'
 import { dial, type Link, type Session } from './session.ts'
@@ -54,7 +63,15 @@ function toError(e: ErrorMsg): AzoraError {
 
 /** @internal */
 export class Client {
-  readonly stats = { connects: 0, disconnects: 0, connectFailures: 0, retries: 0, rateLimited: 0, resyncs: 0, refreshes: 0 }
+  readonly stats = {
+    connects: 0,
+    disconnects: 0,
+    connectFailures: 0,
+    retries: 0,
+    rateLimited: 0,
+    resyncs: 0,
+    refreshes: 0,
+  }
 
   private readonly o: ResolvedOptions
   private readonly discovery: Discovery | null // supplies the server key when the URL has none
@@ -314,7 +331,10 @@ export class Client {
         } catch (e) {
           if (e instanceof LostError) {
             if (policy.once && e.sent) throw new UnknownOutcomeError()
-            if (policy.link) throw new TxExpiredError(`the connection that held the transaction was lost (${e.message}); the server rolled it back`)
+            if (policy.link)
+              throw new TxExpiredError(
+                `the connection that held the transaction was lost (${e.message}); the server rolled it back`,
+              )
             this.stats.retries++
             continue
           }
@@ -461,11 +481,22 @@ export class Client {
   }
 
   /** Sends statements as one Exec (single) or a Tx; exactly once when mutationId is set. */
-  async write(mutationId: string, stmts: Array<{ sql: string; args: Value[] | null }>, single: boolean, opts?: CallOptions): Promise<Result> {
+  async write(
+    mutationId: string,
+    stmts: Array<{ sql: string; args: Value[] | null }>,
+    single: boolean,
+    opts?: CallOptions,
+  ): Promise<Result> {
     const m = await this.call(
       (id) =>
         single
-          ? { type: MsgType.Exec, reqId: id, mutationId, sql: (stmts[0] as { sql: string }).sql, args: (stmts[0] as { args: Value[] | null }).args }
+          ? {
+              type: MsgType.Exec,
+              reqId: id,
+              mutationId,
+              sql: (stmts[0] as { sql: string }).sql,
+              args: (stmts[0] as { args: Value[] | null }).args,
+            }
           : { type: MsgType.Tx, reqId: id, mutationId, statements: stmts },
       { once: mutationId === '' },
       opts,
@@ -510,7 +541,10 @@ export class Client {
       const m = await this.call(
         (id, link) => {
           if (link.info.txIdleMs === 0) {
-            throw new AzoraError(ErrorCode.Unavailable, 'this server does not support interactive transactions (its Welcome carries no transaction lease: the engine is older, or realtime.tx_idle_timeout is 0); use db.batch')
+            throw new AzoraError(
+              ErrorCode.Unavailable,
+              'this server does not support interactive transactions (its Welcome carries no transaction lease: the engine is older, or realtime.tx_idle_timeout is 0); use db.batch',
+            )
           }
           on = link
           return { type: MsgType.TxBegin, reqId: id }
@@ -530,7 +564,11 @@ export class Client {
 
   /** Runs one statement of an interactive transaction, on its link. */
   async txStmt(h: TxHandle, sql: string, args: Value[] | null, query: boolean, opts?: CallOptions): Promise<Result> {
-    const m = await this.call((id) => ({ type: MsgType.TxStmt, reqId: id, txId: h.txId, sql, args, query }), { link: h.link }, opts)
+    const m = await this.call(
+      (id) => ({ type: MsgType.TxStmt, reqId: id, txId: h.txId, sql, args, query }),
+      { link: h.link },
+      opts,
+    )
     if (m.type !== MsgType.Result) throw new Error(`azora: unexpected answer type ${m.type}`)
     return m
   }
@@ -541,7 +579,11 @@ export class Client {
    * UnknownOutcomeError.
    */
   async txEnd(h: TxHandle, commit: boolean, mutation: string, opts?: CallOptions): Promise<void> {
-    const m = await this.call((id) => ({ type: MsgType.TxEnd, reqId: id, txId: h.txId, commit, mutation }), { link: h.link, once: commit }, opts)
+    const m = await this.call(
+      (id) => ({ type: MsgType.TxEnd, reqId: id, txId: h.txId, commit, mutation }),
+      { link: h.link, once: commit },
+      opts,
+    )
     if (m.type !== (commit ? MsgType.Result : MsgType.OK)) throw new Error(`azora: unexpected answer type ${m.type}`)
   }
 
@@ -563,7 +605,11 @@ export class Client {
    * connection, so the call is always safe to retry.
    */
   async callUnit(name: string, argsJSON: string, mutationId: string, opts?: CallOptions): Promise<Returned> {
-    const m = await this.call((id) => ({ type: MsgType.Call, reqId: id, unit: name, args: argsJSON, mutationId }), {}, opts)
+    const m = await this.call(
+      (id) => ({ type: MsgType.Call, reqId: id, unit: name, args: argsJSON, mutationId }),
+      {},
+      opts,
+    )
     if (m.type !== MsgType.Returned) throw new Error(`azora: unexpected answer type ${m.type}`)
     return m
   }
@@ -575,7 +621,11 @@ export class Client {
    * UnknownOutcomeError. Reads are retried.
    */
   async unitAdmin(op: string, body: string, opts?: CallOptions): Promise<string> {
-    const m = await this.call((id) => ({ type: MsgType.UnitAdmin, reqId: id, op, body }), { once: !UNIT_ADMIN_READS.has(op) }, opts)
+    const m = await this.call(
+      (id) => ({ type: MsgType.UnitAdmin, reqId: id, op, body }),
+      { once: !UNIT_ADMIN_READS.has(op) },
+      opts,
+    )
     if (m.type !== MsgType.UnitAdminResult) throw new Error(`azora: unexpected answer type ${m.type}`)
     return m.body
   }
