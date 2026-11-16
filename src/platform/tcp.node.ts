@@ -73,7 +73,12 @@ export function connectTCP(host: string, port: number, signal: AbortSignal): Pro
       let buf = take(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
       let at = 0
       while (buf.length - at >= 4) {
-        const size = ((buf[at] as number) << 24 | (buf[at + 1] as number) << 16 | (buf[at + 2] as number) << 8 | (buf[at + 3] as number)) >>> 0
+        const size =
+          (((buf[at] as number) << 24) |
+            ((buf[at + 1] as number) << 16) |
+            ((buf[at + 2] as number) << 8) |
+            (buf[at + 3] as number)) >>>
+          0
         if (size > FRAME_SIZE) {
           sock.destroy()
           finish(new ConnectionError(`azora: frame of ${size} bytes is too large`))
@@ -91,6 +96,8 @@ export function connectTCP(host: string, port: number, signal: AbortSignal): Pro
       }
     })
     sock.on('error', (e: Error) => finish(new ConnectionError(`azora: ${e.message}`)))
-    sock.on('close', () => finish(pendingLen > 0 ? new ConnectionError('azora: connection closed inside a frame') : undefined))
+    sock.on('close', () =>
+      finish(pendingLen > 0 ? new ConnectionError('azora: connection closed inside a frame') : undefined),
+    )
   })
 }
