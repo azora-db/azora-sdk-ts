@@ -8,7 +8,13 @@ export const echo = query({ args: v.any(), handler: (_ctx, a) => a })
 
 /** Who called, as the unit sees it. */
 export const whoami = query({
-  handler: (ctx) => ({ kind: ctx.auth.kind, principal: ctx.auth.principal, subject: ctx.auth.subject, unit: ctx.unit.name, trigger: ctx.unit.trigger }),
+  handler: (ctx) => ({
+    kind: ctx.auth.kind,
+    principal: ctx.auth.principal,
+    subject: ctx.auth.subject,
+    unit: ctx.unit.name,
+    trigger: ctx.unit.trigger,
+  }),
 })
 
 /** Counts its runs: a retried call with the same mutation id must not count twice. */
@@ -29,15 +35,37 @@ export const boom = mutation({
 })
 
 /** Throws a UnitError with data. */
-export const refuse = query({ handler: () => { throw new UnitError('conflict', 'already paid', { order: 7 }) } })
+export const refuse = query({
+  handler: () => {
+    throw new UnitError('conflict', 'already paid', { order: 7 })
+  },
+})
 
 /** Whether a secret is set (never its value). */
 export const hasSecret = query({ args: { name: v.string() }, handler: (ctx, { name }) => ctx.env[name] !== undefined })
 
 // Files (ctx.storage). The docs table has a FILE column.
 
-const fileView = (f: { bucket: string; path: string; name: string; contentType: string; size: number; sha256: string; metadata: Record<string, string> } | null) =>
-  f && { bucket: f.bucket, path: f.path, name: f.name, contentType: f.contentType, size: f.size, sha256: f.sha256, metadata: f.metadata }
+const fileView = (
+  f: {
+    bucket: string
+    path: string
+    name: string
+    contentType: string
+    size: number
+    sha256: string
+    metadata: Record<string, string>
+  } | null,
+) =>
+  f && {
+    bucket: f.bucket,
+    path: f.path,
+    name: f.name,
+    contentType: f.contentType,
+    size: f.size,
+    sha256: f.sha256,
+    metadata: f.metadata,
+  }
 
 /** Stores a file with the row that references it, in one transaction. */
 export const saveDoc = mutation({
@@ -70,7 +98,10 @@ export const putReport = mutation({
   handler: (ctx, { path, text }) => fileView(ctx.storage.put(text, { path, contentType: 'text/plain' })),
 })
 
-export const findReport = query({ args: { path: v.string() }, handler: (ctx, { path }) => fileView(ctx.storage.statPath(path)) })
+export const findReport = query({
+  args: { path: v.string() },
+  handler: (ctx, { path }) => fileView(ctx.storage.statPath(path)),
+})
 
 /** Deletes the report at a path; false when there is none. */
 export const dropReport = mutation({
@@ -111,7 +142,16 @@ export const httpEcho = query({
   http: 'public',
   handler: (ctx, args: unknown) => {
     const r = ctx.request
-    return { args: args ?? null, method: r?.method, path: r?.path, query: r?.query, body: r?.body, test: r?.headers['x-test'] ?? null, kind: ctx.auth.kind, via: ctx.unit.trigger }
+    return {
+      args: args ?? null,
+      method: r?.method,
+      path: r?.path,
+      query: r?.query,
+      body: r?.body,
+      test: r?.headers['x-test'] ?? null,
+      kind: ctx.auth.kind,
+      via: ctx.unit.trigger,
+    }
   },
 })
 
@@ -129,7 +169,8 @@ export const httpHook = mutation({
     const r = ctx.request
     if (!r) throw new UnitError('invalid', 'call me over HTTP')
     const want = ctx.crypto.hmac(ctx.env['HOOK_SECRET'] ?? '', r.body)
-    if (!ctx.crypto.timingSafeEqual(want, r.headers['x-signature'] ?? '')) throw new UnitError('permission_denied', 'bad signature')
+    if (!ctx.crypto.timingSafeEqual(want, r.headers['x-signature'] ?? ''))
+      throw new UnitError('permission_denied', 'bad signature')
     ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', ctx.now(), 'hook', event.type ?? '')
     return httpResponse(`accepted ${event.type ?? ''}`, { status: 202, headers: { 'X-Handled': 'yes' } })
   },
