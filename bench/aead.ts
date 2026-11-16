@@ -8,7 +8,10 @@ const ad = new Uint8Array(0)
 for (const size of [32, 128, 512, 2048, 8192, 65000]) {
   const pt = new Uint8Array(size).fill(3)
   const line: string[] = [`${String(size).padStart(6)} bytes`]
-  for (const [name, impl] of [['native', native], ['js', js]] as const) {
+  for (const [name, impl] of [
+    ['native', native],
+    ['js', js],
+  ] as const) {
     const ct = impl.seal(key, nonce, ad, pt)
     const n = size > 8000 ? 2000 : 50_000
     for (let i = 0; i < 2000; i++) impl.open(key, nonce, ad, impl.seal(key, nonce, ad, pt)) // warm up
