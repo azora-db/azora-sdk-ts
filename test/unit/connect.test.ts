@@ -6,7 +6,14 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { resolveOptions } from '../../src/config.ts'
 import { Discovery } from '../../src/discovery.ts'
-import { connect, connectEnv, ConnectionError, HandshakeError, type ConnectOptions, type Database } from '../../src/index.ts'
+import {
+  connect,
+  connectEnv,
+  ConnectionError,
+  HandshakeError,
+  type ConnectOptions,
+  type Database,
+} from '../../src/index.ts'
 import { MsgType } from '../../src/messages.ts'
 import { FakeServer } from '../helpers/fake-server.ts'
 import { KeyedServer } from '../helpers/keyed-server.ts'
@@ -21,7 +28,8 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+const json = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 /** A fetch that records the URLs asked and answers with what `answer` returns. */
 function fakeFetch(answer: (url: string) => Response | Promise<Response>): { fetch: typeof fetch; urls: string[] } {
@@ -63,7 +71,12 @@ describe('connectEnv', () => {
     vi.stubEnv('AZORA_API_KEY', 'azk_ignored')
     const db = keep(await connectEnv({ transport: s.transport, clientName: 'env-test/1' }))
     expect(db.name).toBe('shop')
-    expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, database: 'shop', credential: 'azk_from_env', client: 'env-test/1 +tx' })
+    expect(s.last.received[0]).toMatchObject({
+      type: MsgType.Hello,
+      database: 'shop',
+      credential: 'azk_from_env',
+      client: 'env-test/1 +tx',
+    })
   })
 
   test('falls back to AZORA_API_KEY; a credential in options wins over the environment', async () => {
@@ -100,7 +113,9 @@ describe('discovery: a URL without a server key', () => {
   test('over https the key and the WebSocket path come from /.well-known/azora.json', async () => {
     const server = new KeyedServer()
     const { fetch, urls } = fakeFetch(() => json(server.document()))
-    const db = keep(await connect('https://db.example.com/shop', { token: 'azk_k', transport: server.transport, fetch }))
+    const db = keep(
+      await connect('https://db.example.com/shop', { token: 'azk_k', transport: server.transport, fetch }),
+    )
     expect(urls).toEqual(['https://db.example.com/.well-known/azora.json'])
     expect(db.session).toMatchObject({ mode: 'IK', serverKey: server.serverKey, principal: 'azk_k' })
     expect(await db.queryValue('SELECT 1')).toBe('SELECT 1')
@@ -109,12 +124,20 @@ describe('discovery: a URL without a server key', () => {
     const custom = fakeFetch(() => json(server.document('/realtime/v2')))
     const ac = new AbortController()
     const o = resolveOptions({ url: 'https://example.com/azora/eu/shop', token: 't', fetch: custom.fetch })
-    expect(o).toMatchObject({ storageUrl: 'https://example.com/azora/eu', discovery: { base: 'https://example.com/azora/eu' } })
+    expect(o).toMatchObject({
+      storageUrl: 'https://example.com/azora/eu',
+      discovery: { base: 'https://example.com/azora/eu' },
+    })
     const at = await new Discovery(o).get(ac.signal)
     expect(custom.urls).toEqual(['https://example.com/azora/eu/.well-known/azora.json'])
     expect(at.webSocketUrl).toBe('wss://example.com/azora/eu/realtime/v2')
     expect(at.security.serverKey).toHaveLength(32)
-    const fixed = resolveOptions({ url: 'https://example.com/shop', token: 't', fetch: custom.fetch, webSocketUrl: 'wss://rt.example.com/rt/v1' })
+    const fixed = resolveOptions({
+      url: 'https://example.com/shop',
+      token: 't',
+      fetch: custom.fetch,
+      webSocketUrl: 'wss://rt.example.com/rt/v1',
+    })
     expect((await new Discovery(fixed).get(ac.signal)).webSocketUrl).toBe('wss://rt.example.com/rt/v1')
   })
 
@@ -133,7 +156,15 @@ describe('discovery: a URL without a server key', () => {
     const { fetch, urls } = fakeFetch(() => json(server.document()))
     let dialed = 0
     const transport: ConnectOptions['transport'] = (signal) => (dialed++, server.transport(signal))
-    for (const host of ['db.example.com', '10.0.0.5:8090', '192.168.1.20', '128.0.0.1', 'localhost.example.com', '[::2]', '0.0.0.0:8090']) {
+    for (const host of [
+      'db.example.com',
+      '10.0.0.5:8090',
+      '192.168.1.20',
+      '128.0.0.1',
+      'localhost.example.com',
+      '[::2]',
+      '0.0.0.0:8090',
+    ]) {
       const err = await connect(`http://${host}/shop`, { token: 'k', transport, fetch }).catch((e: unknown) => e)
       expect(err, host).toBeInstanceOf(TypeError)
       expect((err as Error).message, host).toMatch(/has no server key: add \?key=<server key> to the URL/)
@@ -149,10 +180,23 @@ describe('discovery: a URL without a server key', () => {
     const o = { token: 'k', transport: server.transport, fetch }
     expect(keep(await connect(`http://db.example.com/shop?key=${server.serverKey}`, o)).session?.mode).toBe('IK')
     expect(keep(await connect(`https://db.example.com/shop?key=${server.serverKey}`, o)).session?.mode).toBe('IK')
-    expect(keep(await connect('http://db.example.com/shop', { ...o, serverKey: server.serverKey })).session?.mode).toBe('IK')
-    expect(resolveOptions({ url: 'http://db.example.com/shop?fp=azp1-aaaa-bbbb-cccc-dddd-eeee-ffff', token: 'k' }).discovery).toBeNull()
-    expect(resolveOptions({ url: 'http://db.example.com/shop', fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff', token: 'k' }).discovery).toBeNull()
-    expect(resolveOptions({ url: 'http://db.example.com/shop?plaintext=1', token: 'k' })).toMatchObject({ discovery: null, security: { allowPlaintext: true } })
+    expect(keep(await connect('http://db.example.com/shop', { ...o, serverKey: server.serverKey })).session?.mode).toBe(
+      'IK',
+    )
+    expect(
+      resolveOptions({ url: 'http://db.example.com/shop?fp=azp1-aaaa-bbbb-cccc-dddd-eeee-ffff', token: 'k' }).discovery,
+    ).toBeNull()
+    expect(
+      resolveOptions({
+        url: 'http://db.example.com/shop',
+        fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff',
+        token: 'k',
+      }).discovery,
+    ).toBeNull()
+    expect(resolveOptions({ url: 'http://db.example.com/shop?plaintext=1', token: 'k' })).toMatchObject({
+      discovery: null,
+      security: { allowPlaintext: true },
+    })
     // The other URL forms never discover: without a key they are refused as before.
     expect(() => resolveOptions({ url: 'wss://db.example.com/rt/v1?db=shop', token: 'k' })).toThrow(/serverKey/)
     expect(() => resolveOptions({ url: 'azora://localhost/shop', token: 'k' })).toThrow(/serverKey/)
@@ -163,25 +207,52 @@ describe('discovery: a URL without a server key', () => {
     const server = new KeyedServer()
     const good = server.document()
     const cases: Array<[string, () => Response | Promise<Response>, RegExp]> = [
-      ['not found', () => new Response('404 page not found', { status: 404 }), /HTTP 404: this server does not publish its key; add \?key=/],
+      [
+        'not found',
+        () => new Response('404 page not found', { status: 404 }),
+        /HTTP 404: this server does not publish its key; add \?key=/,
+      ],
       ['server error', () => new Response('no active server key', { status: 503 }), /HTTP 503/],
       ['not JSON', () => new Response('<html>hello</html>'), /not JSON/],
       ['not an object', () => json([good]), /not a discovery document/],
       ['another version', () => json({ ...good, azora: 2 }), /unsupported document version 2/],
-      ['no version', () => json({ server_key: good['server_key'], websocket: '/rt/v1' }), /unsupported document version/],
+      [
+        'no version',
+        () => json({ server_key: good['server_key'], websocket: '/rt/v1' }),
+        /unsupported document version/,
+      ],
       ['no key', () => json({ azora: 1, websocket: '/rt/v1' }), /"server_key" is not a base64 32-byte key/],
       ['a short key', () => json({ ...good, server_key: 'c2hvcnQ' }), /"server_key" is not a base64 32-byte key/],
       ['no path', () => json({ azora: 1, server_key: good['server_key'] }), /"websocket" is not a path/],
       ['another host as path', () => json({ ...good, websocket: '//evil.example/rt/v1' }), /"websocket" is not a path/],
       ['a URL as path', () => json({ ...good, websocket: 'wss://evil.example/rt/v1' }), /"websocket" is not a path/],
-      ['unreachable', () => Promise.reject(new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 203.0.113.9:443') })), /fetch failed \(connect ECONNREFUSED/],
-      ['redirected to plain http', () => Object.defineProperties(json(good), { redirected: { value: true }, url: { value: 'http://elsewhere.example/.well-known/azora.json' } }), /redirected to http:\/\/elsewhere.example, which is not https/],
+      [
+        'unreachable',
+        () =>
+          Promise.reject(new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 203.0.113.9:443') })),
+        /fetch failed \(connect ECONNREFUSED/,
+      ],
+      [
+        'redirected to plain http',
+        () =>
+          Object.defineProperties(json(good), {
+            redirected: { value: true },
+            url: { value: 'http://elsewhere.example/.well-known/azora.json' },
+          }),
+        /redirected to http:\/\/elsewhere.example, which is not https/,
+      ],
     ]
     for (const [name, answer, want] of cases) {
       const { fetch, urls } = fakeFetch(answer)
-      const err = await connect('https://db.example.com/shop', { token: 'k', transport: server.transport, fetch }).catch((e: unknown) => e)
+      const err = await connect('https://db.example.com/shop', {
+        token: 'k',
+        transport: server.transport,
+        fetch,
+      }).catch((e: unknown) => e)
       expect(err, name).toBeInstanceOf(ConnectionError)
-      expect((err as Error).message, name).toMatch(/^azora: discovery: https:\/\/db\.example\.com\/\.well-known\/azora\.json: /)
+      expect((err as Error).message, name).toMatch(
+        /^azora: discovery: https:\/\/db\.example\.com\/\.well-known\/azora\.json: /,
+      )
       expect((err as Error).message, name).toMatch(want)
       expect(urls, name).toHaveLength(1)
     }
@@ -192,7 +263,9 @@ describe('discovery: a URL without a server key', () => {
     const server = new KeyedServer()
     const stranger = new KeyedServer()
     const { fetch } = fakeFetch(() => json(stranger.document()))
-    await expect(connect('https://db.example.com/shop', { token: 'k', transport: server.transport, fetch })).rejects.toBeInstanceOf(HandshakeError)
+    await expect(
+      connect('https://db.example.com/shop', { token: 'k', transport: server.transport, fetch }),
+    ).rejects.toBeInstanceOf(HandshakeError)
     expect(server.refused).toBe(1)
   })
 
@@ -200,9 +273,16 @@ describe('discovery: a URL without a server key', () => {
     const server = new KeyedServer()
     const { fetch, urls } = fakeFetch(() => json(server.document()))
     const errors: Error[] = []
-    const db = keep(await connect('https://db.example.com/shop', {
-      token: 'k', transport: server.transport, fetch, reconnectMinMs: 1, reconnectMaxMs: 5, onError: (e) => errors.push(e),
-    }))
+    const db = keep(
+      await connect('https://db.example.com/shop', {
+        token: 'k',
+        transport: server.transport,
+        fetch,
+        reconnectMinMs: 1,
+        reconnectMaxMs: 5,
+        onError: (e) => errors.push(e),
+      }),
+    )
     const first = server.serverKey
 
     // A dropped connection alone does not ask again: the key still works.
@@ -226,9 +306,17 @@ describe('discovery: a URL without a server key', () => {
   test('a pool asks once, and once again after a rotation', async () => {
     const server = new KeyedServer()
     const { fetch, urls } = fakeFetch(() => json(server.document()))
-    const db = keep(await connect('http://localhost:8090/shop', {
-      token: 'k', transport: server.transport, fetch, pool: 4, reconnectMinMs: 1, reconnectMaxMs: 5, onError: () => {},
-    }))
+    const db = keep(
+      await connect('http://localhost:8090/shop', {
+        token: 'k',
+        transport: server.transport,
+        fetch,
+        pool: 4,
+        reconnectMinMs: 1,
+        reconnectMaxMs: 5,
+        onError: () => {},
+      }),
+    )
     expect(db.stats.connects).toBe(4)
     expect(urls).toHaveLength(1)
     server.rotate()
@@ -241,9 +329,16 @@ describe('discovery: a URL without a server key', () => {
     const server = new KeyedServer()
     const { fetch, urls } = fakeFetch(() => json(server.document()))
     const errors: Error[] = []
-    const db = keep(await connect(`https://db.example.com/shop?key=${server.serverKey}`, {
-      token: 'k', transport: server.transport, fetch, reconnectMinMs: 1, reconnectMaxMs: 5, onError: (e) => errors.push(e),
-    }))
+    const db = keep(
+      await connect(`https://db.example.com/shop?key=${server.serverKey}`, {
+        token: 'k',
+        transport: server.transport,
+        fetch,
+        reconnectMinMs: 1,
+        reconnectMaxMs: 5,
+        onError: (e) => errors.push(e),
+      }),
+    )
     server.rotate()
     server.dropAll()
     await until(() => errors.length >= 3, 'refused reconnects')
