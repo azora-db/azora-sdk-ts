@@ -53,7 +53,15 @@ export function App() {
         </p>
       </header>
 
-      <NewOrder onSubmit={(o) => run(db.exec(sql`INSERT INTO orders(customer, status, total, note) VALUES (${o.customer}, 'open', ${o.total}, ${o.note})`))} />
+      <NewOrder
+        onSubmit={(o) =>
+          run(
+            db.exec(
+              sql`INSERT INTO orders(customer, status, total, note) VALUES (${o.customer}, 'open', ${o.total}, ${o.note})`,
+            ),
+          )
+        }
+      />
 
       {(failure ?? error?.message) && (
         <p className="notice is-bad" role="alert">
@@ -80,7 +88,10 @@ export function App() {
                   <li className="card is-skeleton" />
                 </ul>
               ) : orders.length === 0 ? (
-                <p className="empty">No {stage.title.toLowerCase()} orders. {stage.status === 'open' ? 'Add one above.' : 'They arrive here as they move along.'}</p>
+                <p className="empty">
+                  No {stage.title.toLowerCase()} orders.{' '}
+                  {stage.status === 'open' ? 'Add one above.' : 'They arrive here as they move along.'}
+                </p>
               ) : (
                 <ul className="cards">
                   {orders.map((o) => (
@@ -94,11 +105,22 @@ export function App() {
                       <p className="card-total">{money.format(o.total)}</p>
                       <div className="card-actions">
                         {stage.next && (
-                          <button type="button" className="button" onClick={() => advance(o, stage.next)} disabled={!connected}>
+                          <button
+                            type="button"
+                            className="button"
+                            onClick={() => advance(o, stage.next)}
+                            disabled={!connected}
+                          >
                             {stage.action}
                           </button>
                         )}
-                        <button type="button" className="button is-quiet" onClick={() => remove(o)} disabled={!connected} aria-label={`Delete order ${o.id}`}>
+                        <button
+                          type="button"
+                          className="button is-quiet"
+                          onClick={() => remove(o)}
+                          disabled={!connected}
+                          aria-label={`Delete order ${o.id}`}
+                        >
                           Delete
                         </button>
                       </div>
@@ -112,8 +134,8 @@ export function App() {
       </div>
 
       <p className="foot">
-        Open this page in a second window, or run <code>node --env-file=examples/.env examples/live-orders.ts</code>: every change shows up
-        here as it commits.
+        Open this page in a second window, or run <code>node --env-file=examples/.env examples/live-orders.ts</code>:
+        every change shows up here as it commits.
       </p>
     </main>
   )
@@ -159,7 +181,12 @@ function NewOrder(props: { onSubmit: (o: { customer: number; total: number; note
     <form className="new" onSubmit={submit}>
       <label className="field is-wide">
         <span>Item</span>
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Standing desk frame" maxLength={120} />
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Standing desk frame"
+          maxLength={120}
+        />
       </label>
       <label className="field">
         <span>Total</span>
