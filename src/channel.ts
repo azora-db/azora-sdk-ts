@@ -162,7 +162,10 @@ export class Channel {
   send(msg: Uint8Array): void {
     if (this.dead) throw new ConnectionError('azora: connection is closed')
     if (msg.length > this.maxMessage) {
-      throw new AzoraError(ErrorCode.ResourceExhausted, `message of ${msg.length} bytes exceeds the limit of ${this.maxMessage}`)
+      throw new AzoraError(
+        ErrorCode.ResourceExhausted,
+        `message of ${msg.length} bytes exceeds the limit of ${this.maxMessage}`,
+      )
     }
     try {
       let at = 0
@@ -191,7 +194,8 @@ export class Channel {
     if (this.dead) return
     let plain = frame
     if (this.in.cs) {
-      if (frame.length < TAG + 1 || frame.length > FRAME_SIZE) return this.fail(new ConnectionError('azora: frame failed authentication'))
+      if (frame.length < TAG + 1 || frame.length > FRAME_SIZE)
+        return this.fail(new ConnectionError('azora: frame failed authentication'))
       try {
         plain = this.in.cs.decrypt(EMPTY, frame)
       } catch {
@@ -203,8 +207,10 @@ export class Channel {
     }
     const flag = plain[0]
     const data = plain.subarray(1)
-    if (flag !== FLAG_MORE && flag !== FLAG_FINAL) return this.fail(new ConnectionError(`azora: protocol violation: chunk flag ${flag}`))
-    if (flag === FLAG_MORE && data.length === 0) return this.fail(new ConnectionError('azora: protocol violation: empty continuation chunk'))
+    if (flag !== FLAG_MORE && flag !== FLAG_FINAL)
+      return this.fail(new ConnectionError(`azora: protocol violation: chunk flag ${flag}`))
+    if (flag === FLAG_MORE && data.length === 0)
+      return this.fail(new ConnectionError('azora: protocol violation: empty continuation chunk'))
     if (this.partsLen + data.length > this.maxMessage) {
       return this.fail(new ConnectionError(`azora: incoming message over ${this.maxMessage} bytes`))
     }
@@ -284,7 +290,8 @@ function checkStatus(reply: Uint8Array, mode: Mode): Uint8Array {
       if (mode === 'plaintext') throw new HandshakeError('azora: plaintext refused by the server')
       break
     case 2:
-      if (mode !== 'plaintext') throw new HandshakeError('azora: unknown server key: the server does not have the requested key')
+      if (mode !== 'plaintext')
+        throw new HandshakeError('azora: unknown server key: the server does not have the requested key')
       break
     case 3:
       throw new HandshakeError(`azora: handshake failed: the server does not support protocol version ${VERSION}`)
@@ -347,7 +354,8 @@ export async function openChannel(t: Transport, sec: ChannelSecurity): Promise<C
     const remote = hs.remoteStatic
     if (!remote || remote.length !== 32) throw new HandshakeError('azora: handshake failed: no server static key')
     if (mode === 'IK') {
-      if (!sec.serverKey || !sameBytes(remote, sec.serverKey)) throw new HandshakeError('azora: handshake failed: server key mismatch')
+      if (!sec.serverKey || !sameBytes(remote, sec.serverKey))
+        throw new HandshakeError('azora: handshake failed: server key mismatch')
     } else if (kid !== '' && keyId(remote) !== kid) {
       throw new HandshakeError('azora: handshake failed: the server sent a key with another id than requested')
     }
