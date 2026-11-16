@@ -9,13 +9,24 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
 import {
-  AzoraError, ConnectionError, connect, ErrorCode, TimeoutError, UnitError, type UnitInfo, type UnitJob, type UnitJobList, type UnitRun, type UnitsAdmin,
+  AzoraError,
+  ConnectionError,
+  connect,
+  ErrorCode,
+  TimeoutError,
+  UnitError,
+  type UnitInfo,
+  type UnitJob,
+  type UnitJobList,
+  type UnitRun,
+  type UnitsAdmin,
 } from '@azora-db/client'
 import { BundleError, bundleUnits, evaluateBundle, findEntry, manifestOf, type Bundle } from './bundle.ts'
 import { EnvError, loadEnv } from './env.ts'
 import { generateGo, goPackage } from './gogen.ts'
 
-const VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
+const VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string })
+  .version
 
 const USAGE = `azora-units: publish and operate the units of an Azora database
 
@@ -106,7 +117,12 @@ function time(ms: number | undefined): string {
 function table(rows: string[][]): string[] {
   const widths: number[] = []
   for (const r of rows) r.forEach((c, i) => (widths[i] = Math.max(widths[i] ?? 0, c.length)))
-  return rows.map((r) => r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i] ?? 0))).join('  ').trimEnd())
+  return rows.map((r) =>
+    r
+      .map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i] ?? 0)))
+      .join('  ')
+      .trimEnd(),
+  )
 }
 
 /** A path for messages: relative to the current directory when under it. */
@@ -120,7 +136,8 @@ function size(n: number): string {
 }
 
 function trigger(u: UnitInfo): string {
-  if (u.kind === 'schedule') return `${u.cron ? `cron ${u.cron}` : `every ${u.every}`}${u.mode === 'action' ? ' (action)' : ''}`
+  if (u.kind === 'schedule')
+    return `${u.cron ? `cron ${u.cron}` : `every ${u.every}`}${u.mode === 'action' ? ' (action)' : ''}`
   if (u.kind === 'onChange') return `on ${u.table} ${(u.ops ?? []).join(',')}${u.mode === 'action' ? ' (action)' : ''}`
   const how = u.internal ? 'internal' : u.access === 'any' ? 'any credential' : ''
   const http = u.http === 'public' ? 'http public' : u.http === 'auth' ? 'http' : ''
@@ -136,7 +153,8 @@ function json(v: unknown, indent = 2): string {
   return (
     JSON.stringify(
       v,
-      (_k, x: unknown) => (x instanceof Uint8Array ? { $bytes: Buffer.from(x).toString('base64') } : typeof x === 'bigint' ? Number(x) : x),
+      (_k, x: unknown) =>
+        x instanceof Uint8Array ? { $bytes: Buffer.from(x).toString('base64') } : typeof x === 'bigint' ? Number(x) : x,
       indent,
     ) ?? 'undefined'
   )
@@ -155,15 +173,21 @@ function logLines(logs: unknown): string[] {
     if (typeof l === 'string') return l
     if (typeof l === 'object' && l !== null) {
       const o = l as { level?: unknown; message?: unknown; msg?: unknown; args?: unknown }
-      const text = o.message ?? o.msg ?? (Array.isArray(o.args) ? o.args.map((a) => (typeof a === 'string' ? a : json(a, 0))).join(' ') : undefined)
-      if (text !== undefined) return `${o.level ? `${String(o.level)} ` : ''}${typeof text === 'string' ? text : json(text, 0)}`
+      const text =
+        o.message ??
+        o.msg ??
+        (Array.isArray(o.args) ? o.args.map((a) => (typeof a === 'string' ? a : json(a, 0))).join(' ') : undefined)
+      if (text !== undefined)
+        return `${o.level ? `${String(o.level)} ` : ''}${typeof text === 'string' ? text : json(text, 0)}`
     }
     return json(l, 0)
   })
 }
 
 function runLines(r: UnitRun): string[] {
-  const out = [`${time(r.at)}  ${String(r.status).padEnd(8)}  ${r.unit}  ${r.trigger}  ${r.principal}  ${ms(r.durationMs)}`]
+  const out = [
+    `${time(r.at)}  ${String(r.status).padEnd(8)}  ${r.unit}  ${r.trigger}  ${r.principal}  ${ms(r.durationMs)}`,
+  ]
   // A rejected call never ran: the caller's mistake, not the unit's.
   if (r.error) out.push(`    ${r.status === 'rejected' ? 'rejected' : 'error'}: ${r.error}`)
   for (const l of logLines(r.logs)) out.push(`    ${l}`)
@@ -182,7 +206,15 @@ function jobLines(r: UnitJobList): string[] {
   r.jobs.forEach((j: UnitJob, i) => {
     // A waiting job's time is when it is due, a failed job's when it failed.
     const when = `${j.state === 'failed' ? 'failed' : 'due'} ${time(j.runAt)}`
-    rows.push([`  ${j.id}`, j.unit, j.state, when, String(j.attempts), `${j.source} (${j.createdBy})`, j.args === undefined ? '' : clip(json(j.args, 0), 40)])
+    rows.push([
+      `  ${j.id}`,
+      j.unit,
+      j.state,
+      when,
+      String(j.attempts),
+      `${j.source} (${j.createdBy})`,
+      j.args === undefined ? '' : clip(json(j.args, 0), 40),
+    ])
     if (j.error) errors.set(i + 1, j.error)
   })
   const out = [`${head}:`]
@@ -204,7 +236,8 @@ export function describe(e: unknown): string {
     if (e.code === ErrorCode.PermissionDenied) {
       return `${e.message}\nManaging units needs an API key with the ddl (or admin) scope: check AZORA_TOKEN (\`azora meta key create <db> --name <name> --scope read,write,ddl\`).`
     }
-    if (e.code === ErrorCode.Unauthenticated) return `${e.message}\nThe server refused AZORA_TOKEN: is it a valid API key for this database?`
+    if (e.code === ErrorCode.Unauthenticated)
+      return `${e.message}\nThe server refused AZORA_TOKEN: is it a valid API key for this database?`
     return e.message
   }
   if (e instanceof ConnectionError || e instanceof TimeoutError) return `cannot reach the database: ${e.message}`
@@ -233,7 +266,8 @@ interface Flags {
 function int(s: string | undefined, what: string, dflt: number): number {
   if (s === undefined) return dflt
   const n = Number(s)
-  if (!Number.isInteger(n) || n < 0) throw new UsageError(`${what} must be a non-negative integer, not ${JSON.stringify(s)}`)
+  if (!Number.isInteger(n) || n < 0)
+    throw new UsageError(`${what} must be a non-negative integer, not ${JSON.stringify(s)}`)
   return n
 }
 
@@ -277,7 +311,10 @@ async function buildToFile(dir: string, f: Flags, io: IO): Promise<void> {
   if (!f.out) throw new UsageError('usage: azora-units build [dir] --out <file>')
   const b = await bundleUnits(dir)
   const units = manifestOf(evaluateBundle(b.bundle)) as UnitInfo[]
-  if (units.length === 0) throw new BundleError(`${show(b.dir)} exports no units (export query, mutation, action, schedule or onChange definitions)`)
+  if (units.length === 0)
+    throw new BundleError(
+      `${show(b.dir)} exports no units (export query, mutation, action, schedule or onChange definitions)`,
+    )
   const file = resolve(f.out)
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, b.bundle)
@@ -288,7 +325,9 @@ async function buildToFile(dir: string, f: Flags, io: IO): Promise<void> {
   }
   io.out(`Wrote ${show(file)} (${size(b.bundle.length)}) with ${units.length} unit${units.length === 1 ? '' : 's'}:`)
   for (const l of unitLines(units)) io.out(l)
-  io.out(`Publish it with: azora units deploy <database> ${show(file)}${b.sourceMap ? ` --source-map ${show(file)}.map` : ''}`)
+  io.out(
+    `Publish it with: azora units deploy <database> ${show(file)}${b.sourceMap ? ` --source-map ${show(file)}.map` : ''}`,
+  )
 }
 
 async function dev(dir: string, f: Flags, io: IO, connector: Connector): Promise<void> {
@@ -335,9 +374,12 @@ async function dev(dir: string, f: Flags, io: IO, connector: Connector): Promise
       }
     }
   }
-  watchers.set(abs, watch(abs, { recursive: true }, (_ev, name) => {
-    if (!name || !/(^|[\\/])(node_modules|\.git)([\\/]|$)/.test(String(name))) schedule()
-  }))
+  watchers.set(
+    abs,
+    watch(abs, { recursive: true }, (_ev, name) => {
+      if (!name || !/(^|[\\/])(node_modules|\.git)([\\/]|$)/.test(String(name))) schedule()
+    }),
+  )
   if (!f.json) io.out(`Watching ${show(abs)}: every save publishes again. Ctrl+C stops.`)
   await once()
   await new Promise<void>((done) => {
@@ -363,7 +405,8 @@ async function logs(f: Flags, io: IO, connector: Connector): Promise<void> {
   const interval = int(f.interval, '--interval', 1000)
   const statuses = ['ok', 'error', 'replayed', 'rejected'] as const
   const status = f.status as (typeof statuses)[number] | undefined
-  if (status !== undefined && !statuses.includes(status)) throw new UsageError(`--status must be one of ${statuses.join(', ')}, not ${JSON.stringify(f.status)}`)
+  if (status !== undefined && !statuses.includes(status))
+    throw new UsageError(`--status must be one of ${statuses.join(', ')}, not ${JSON.stringify(f.status)}`)
   const q = { limit, ...(f.unit !== undefined && { unit: f.unit }), ...(status !== undefined && { status }) }
   await withDb(f, connector, async (a) => {
     let last = 0 // the newest run id printed
@@ -406,7 +449,8 @@ async function types(pos: string[], f: Flags, io: IO, connector: Connector): Pro
   let source: string
   if (f.remote) {
     const r = await withDb(f, connector, (a) => a.list())
-    if (r.version === 0) throw new UsageError('nothing is published yet: publish first, or leave out --remote to read the local units')
+    if (r.version === 0)
+      throw new UsageError('nothing is published yet: publish first, or leave out --remote to read the local units')
     units = r.units
     source = `deploy version ${r.version}`
   } else {
@@ -429,7 +473,11 @@ async function types(pos: string[], f: Flags, io: IO, connector: Connector): Pro
 }
 
 /** Runs the CLI with argv (without node and the script) and returns the exit code. */
-export async function main(argv: string[], io: IO = defaultIO, connector: Connector = defaultConnector): Promise<number> {
+export async function main(
+  argv: string[],
+  io: IO = defaultIO,
+  connector: Connector = defaultConnector,
+): Promise<number> {
   let parsed
   try {
     parsed = parseArgs({
@@ -500,7 +548,14 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
           const rows = [['  VERSION', 'AT', 'BY', 'UNITS', 'SHA256', 'NOTE']]
           for (const d of r.deploys) {
             const n = Array.isArray(d.units) ? d.units.length : d.units
-            rows.push([`${d.active || d.version === r.active ? '*' : ' '} ${d.version}`, time(d.at), d.by, String(n ?? ''), (d.sha256 ?? '').slice(0, 12), d.note ?? ''])
+            rows.push([
+              `${d.active || d.version === r.active ? '*' : ' '} ${d.version}`,
+              time(d.at),
+              d.by,
+              String(n ?? ''),
+              (d.sha256 ?? '').slice(0, 12),
+              d.note ?? '',
+            ])
           }
           for (const l of table(rows)) io.out(l)
         }
@@ -551,7 +606,8 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
         } else if (sub === 'set') {
           need(2, 'secrets set <name> [value]   (without a value, it is read from stdin)')
           const v = value ?? (await io.readSecret(`Value of ${name}: `))
-          if (v === '') throw new UsageError(`empty value: use \`azora-units secrets unset ${name}\` to remove a secret`)
+          if (v === '')
+            throw new UsageError(`empty value: use \`azora-units secrets unset ${name}\` to remove a secret`)
           await withDb(f, connector, (a) => a.secrets.set(name as string, v))
           io.out(f.json ? json({ name }) : `Set ${name}.`)
         } else if (sub === 'unset') {
@@ -567,8 +623,13 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
         const [sub, id] = pos
         if (sub === undefined || sub === 'list') {
           const state = f.state as 'pending' | 'failed' | undefined
-          if (state !== undefined && state !== 'pending' && state !== 'failed') throw new UsageError(`--state must be pending or failed, not ${JSON.stringify(f.state)}`)
-          const o = { limit: int(f.limit, '--limit', 100), ...(state !== undefined && { state }), ...(f.unit !== undefined && { unit: f.unit }) }
+          if (state !== undefined && state !== 'pending' && state !== 'failed')
+            throw new UsageError(`--state must be pending or failed, not ${JSON.stringify(f.state)}`)
+          const o = {
+            limit: int(f.limit, '--limit', 100),
+            ...(state !== undefined && { state }),
+            ...(f.unit !== undefined && { unit: f.unit }),
+          }
           const r = await withDb(f, connector, (a) => a.jobs.list(o))
           if (f.json) io.out(json(r))
           else for (const l of jobLines(r)) io.out(l)
@@ -581,7 +642,9 @@ export async function main(argv: string[], io: IO = defaultIO, connector: Connec
           await withDb(f, connector, (a) => a.jobs.retry(id as string))
           io.out(f.json ? json({ id }) : `${id} runs again now.`)
         } else {
-          throw new UsageError('usage: azora-units jobs [--state pending|failed] [--unit name] [--limit n] | cancel <id> | retry <id>')
+          throw new UsageError(
+            'usage: azora-units jobs [--state pending|failed] [--unit name] [--limit n] | cancel <id> | retry <id>',
+          )
         }
         break
       }
