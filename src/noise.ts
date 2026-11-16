@@ -17,7 +17,13 @@ export type Pattern = 'IK' | 'XX'
 type Token = 'e' | 's' | 'ee' | 'es' | 'se' | 'ss'
 
 const PATTERNS: Record<Pattern, { responderPre: boolean; messages: Token[][] }> = {
-  IK: { responderPre: true, messages: [['e', 'es', 's', 'ss'], ['e', 'ee', 'se']] },
+  IK: {
+    responderPre: true,
+    messages: [
+      ['e', 'es', 's', 'ss'],
+      ['e', 'ee', 'se'],
+    ],
+  },
   XX: { responderPre: false, messages: [['e'], ['e', 'ee', 's', 'es'], ['s', 'se']] },
 }
 
