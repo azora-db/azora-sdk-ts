@@ -114,7 +114,8 @@ export async function readSchema(db: Pick<Database, 'query'>, options: ReadSchem
   }
   if (wanted) {
     const missing = [...wanted].filter((n) => !byName.has(n))
-    if (missing.length > 0) throw new TypegenError(`no table or view named ${missing.map((n) => `"${n}"`).join(', ')} in the database`)
+    if (missing.length > 0)
+      throw new TypegenError(`no table or view named ${missing.map((n) => `"${n}"`).join(', ')} in the database`)
   }
   return { tables }
 }
@@ -167,7 +168,9 @@ function tsType(kind: ColumnKind, o: GenerateOptions): string {
 function rowidAlias(t: TableSchema): ColumnSchema | undefined {
   const pk = t.columns.filter((c) => (c.pk ?? 0) > 0)
   const only = pk[0]
-  return t.kind === 'table' && pk.length === 1 && only && only.type.trim().toUpperCase() === 'INTEGER' ? only : undefined
+  return t.kind === 'table' && pk.length === 1 && only && only.type.trim().toUpperCase() === 'INTEGER'
+    ? only
+    : undefined
 }
 
 /** `order_items` -> `OrderItems`: the parts between non-alphanumerics, capitalized; never singularized. */
