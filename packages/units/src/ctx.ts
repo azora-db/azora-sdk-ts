@@ -240,7 +240,8 @@ export interface Crypto {
 type BrandOf<T> = T extends { readonly '~azora'?: infer B } ? Exclude<B, undefined> : never
 
 /** The arguments a job of unit N of module M takes (left out when the unit takes none). */
-type JobArgs<M, N extends keyof M> = BrandOf<M[N]> extends { args: infer A } ? (undefined extends A ? [args?: A] : [args: A]) : [args?: unknown]
+type JobArgs<M, N extends keyof M> =
+  BrandOf<M[N]> extends { args: infer A } ? (undefined extends A ? [args?: A] : [args: A]) : [args?: unknown]
 
 /**
  * `ctx.scheduler`: runs a mutation or action later, once (docs/units.md,
