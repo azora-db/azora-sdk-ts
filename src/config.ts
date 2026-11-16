@@ -225,7 +225,10 @@ function parse(input: string): Parsed {
         out.fingerprint = v
         break
       case 'db':
-        if (web) bad(`connection string: unknown parameter "db" (in an ${scheme}:// URL the database is the last path segment)`)
+        if (web)
+          bad(
+            `connection string: unknown parameter "db" (in an ${scheme}:// URL the database is the last path segment)`,
+          )
         out.database = v
         break
       case 'plaintext':
@@ -303,7 +306,9 @@ export function parseUrl(input: string): ConnectOptions {
 }
 
 /** Builds the handshake configuration from the key options. */
-export function security(o: Pick<ConnectOptions, 'serverKey' | 'fingerprint' | 'allowPlaintext' | 'rekeyFrames' | 'rekeyBytes'>): ChannelSecurity {
+export function security(
+  o: Pick<ConnectOptions, 'serverKey' | 'fingerprint' | 'allowPlaintext' | 'rekeyFrames' | 'rekeyBytes'>,
+): ChannelSecurity {
   const sec: ChannelSecurity = {}
   if (o.rekeyFrames !== undefined) sec.rekeyFrames = o.rekeyFrames
   if (o.rekeyBytes !== undefined) sec.rekeyBytes = o.rekeyBytes
@@ -354,7 +359,8 @@ export function resolveOptions(input: ConnectOptions): ResolvedOptions {
     } catch {
       bad(`webSocketUrl "${o.webSocketUrl}": want ws:// or wss://`)
     }
-    if ((u.protocol !== 'ws:' && u.protocol !== 'wss:') || !u.host) bad(`webSocketUrl "${o.webSocketUrl}": want ws:// or wss://`)
+    if ((u.protocol !== 'ws:' && u.protocol !== 'wss:') || !u.host)
+      bad(`webSocketUrl "${o.webSocketUrl}": want ws:// or wss://`)
     webSocketUrl = o.webSocketUrl
   }
   const port = o.port ?? DEFAULT_PORT
