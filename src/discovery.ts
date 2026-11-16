@@ -74,14 +74,16 @@ export class Discovery {
 
   private async load(signal: AbortSignal): Promise<Endpoint> {
     const f = this.o.fetch ?? (globalThis as { fetch?: typeof fetch }).fetch
-    if (typeof f !== 'function') this.fail('this runtime has no fetch: pass one with the fetch option, or add ?key=<server key> to the URL')
+    if (typeof f !== 'function')
+      this.fail('this runtime has no fetch: pass one with the fetch option, or add ?key=<server key> to the URL')
     this.fetches++
     let doc: unknown
     try {
       const res = await f(this.url, { signal })
       if (res.redirected && res.url) {
         const to = new URL(res.url)
-        if (to.protocol !== 'https:' && !isLoopbackHost(to.hostname)) this.fail(`redirected to ${to.origin}, which is not https`)
+        if (to.protocol !== 'https:' && !isLoopbackHost(to.hostname))
+          this.fail(`redirected to ${to.origin}, which is not https`)
       }
       if (!res.ok) {
         this.fail(
@@ -102,7 +104,8 @@ export class Discovery {
       const cause = (e as { cause?: { message?: string } }).cause?.message
       this.fail(`${(e as Error).message}${cause ? ` (${cause})` : ''}`)
     }
-    if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) this.fail('the answer is not a discovery document')
+    if (typeof doc !== 'object' || doc === null || Array.isArray(doc))
+      this.fail('the answer is not a discovery document')
     const d = doc as { azora?: unknown; server_key?: unknown; websocket?: unknown; features?: unknown }
     if (d.azora !== 1) this.fail(`unsupported document version ${JSON.stringify(d.azora) ?? 'none'} (want "azora": 1)`)
     let key: Uint8Array
@@ -113,7 +116,8 @@ export class Discovery {
       this.fail('"server_key" is not a base64 32-byte key')
     }
     const path = d.websocket
-    if (typeof path !== 'string' || !/^\/(?!\/)/.test(path)) this.fail(`"websocket" is not a path: ${JSON.stringify(path) ?? 'missing'}`)
+    if (typeof path !== 'string' || !/^\/(?!\/)/.test(path))
+      this.fail(`"websocket" is not a path: ${JSON.stringify(path) ?? 'missing'}`)
     const { base, fixedEndpoint } = this.o.discovery as { base: string; fixedEndpoint: boolean }
     // Servers older than the field list nothing.
     this.features = Array.isArray(d.features) ? d.features.filter((f): f is string => typeof f === 'string') : []
