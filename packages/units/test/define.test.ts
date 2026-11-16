@@ -1,6 +1,19 @@
 import { describe, expect, expectTypeOf, test } from 'vitest'
 import {
-  action, isUnitDefinition, isUnitName, mutation, onChange, query, schedule, UnitError, v, type JobInfo, type MutationCtx, type QueryCtx, type UnitBrand, httpResponse,
+  action,
+  isUnitDefinition,
+  isUnitName,
+  mutation,
+  onChange,
+  query,
+  schedule,
+  UnitError,
+  v,
+  type JobInfo,
+  type MutationCtx,
+  type QueryCtx,
+  type UnitBrand,
+  httpResponse,
 } from '../src/index.ts'
 
 type BrandOf<T> = T extends { readonly '~azora'?: infer B } ? Exclude<B, undefined> : never
@@ -8,12 +21,28 @@ type BrandOf<T> = T extends { readonly '~azora'?: infer B } ? Exclude<B, undefin
 describe('definitions', () => {
   test('are the plain objects of the bundle format', () => {
     const handler = (): number => 1
-    expect(query({ handler })).toEqual({ '~azora': 1, kind: 'query', handler, args: null, internal: false, description: '' })
+    expect(query({ handler })).toEqual({
+      '~azora': 1,
+      kind: 'query',
+      handler,
+      args: null,
+      internal: false,
+      description: '',
+    })
     expect(mutation({ args: { a: v.string() }, internal: true, description: 'd', handler })).toEqual({
-      '~azora': 1, kind: 'mutation', handler, internal: true, description: 'd',
+      '~azora': 1,
+      kind: 'mutation',
+      handler,
+      internal: true,
+      description: 'd',
       args: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'], additionalProperties: false },
     })
-    expect(action({ args: v.string(), handler })).toMatchObject({ '~azora': 1, kind: 'action', args: { type: 'string' }, internal: false })
+    expect(action({ args: v.string(), handler })).toMatchObject({
+      '~azora': 1,
+      kind: 'action',
+      args: { type: 'string' },
+      internal: false,
+    })
     // access is in the definition only when declared: the engine applies the default.
     expect(mutation({ access: 'any', handler })).toMatchObject({ kind: 'mutation', access: 'any' })
     expect(query({ access: 'write', handler })).toMatchObject({ access: 'write' })
@@ -24,18 +53,48 @@ describe('definitions', () => {
     expect(query({ http: false, handler })).not.toHaveProperty('http')
     expect(() => query({ http: 'yes' as never, handler })).toThrow('http must be true or "public"')
     expect(() => query({ http: true, internal: true, handler })).toThrow('an internal unit cannot be called over HTTP')
-    expect(httpResponse('hi', { status: 201, headers: { 'X-A': 'b' } })).toEqual({ '~http': 1, status: 201, headers: { 'X-A': 'b' }, body: 'hi' })
+    expect(httpResponse('hi', { status: 201, headers: { 'X-A': 'b' } })).toEqual({
+      '~http': 1,
+      status: 201,
+      headers: { 'X-A': 'b' },
+      body: 'hi',
+    })
     expect(httpResponse()).toEqual({ '~http': 1, status: 200, headers: {}, body: null })
     expect(() => httpResponse('x', { status: 99 })).toThrow('status must be an integer from 200 to 599')
     expect(schedule({ cron: '0 3 * * *', handler })).toEqual({
-      '~azora': 1, kind: 'schedule', handler, args: null, internal: true, description: '', mode: 'mutation', cron: '0 3 * * *', every: '',
+      '~azora': 1,
+      kind: 'schedule',
+      handler,
+      args: null,
+      internal: true,
+      description: '',
+      mode: 'mutation',
+      cron: '0 3 * * *',
+      every: '',
     })
-    expect(schedule({ every: '1h30m', mode: 'action', handler })).toMatchObject({ mode: 'action', cron: '', every: '1h30m', internal: true })
+    expect(schedule({ every: '1h30m', mode: 'action', handler })).toMatchObject({
+      mode: 'action',
+      cron: '',
+      every: '1h30m',
+      internal: true,
+    })
     expect(onChange({ table: 'orders', handler })).toEqual({
-      '~azora': 1, kind: 'onChange', handler, args: null, internal: true, description: '', mode: 'mutation', table: 'orders',
-      ops: ['insert', 'update', 'delete'], batch: 100,
+      '~azora': 1,
+      kind: 'onChange',
+      handler,
+      args: null,
+      internal: true,
+      description: '',
+      mode: 'mutation',
+      table: 'orders',
+      ops: ['insert', 'update', 'delete'],
+      batch: 100,
     })
-    expect(onChange({ table: 'orders', ops: ['update'], batch: 10, mode: 'action', handler })).toMatchObject({ ops: ['update'], batch: 10, mode: 'action' })
+    expect(onChange({ table: 'orders', ops: ['update'], batch: 10, mode: 'action', handler })).toMatchObject({
+      ops: ['update'],
+      batch: 10,
+      mode: 'action',
+    })
     expect(isUnitDefinition(query({ handler }))).toBe(true)
     expect(isUnitDefinition({ kind: 'query' })).toBe(false)
   })
@@ -72,7 +131,9 @@ describe('definitions', () => {
         return { orderId: 1 }
       },
     })
-    expectTypeOf<BrandOf<typeof checkout>>().toEqualTypeOf<UnitBrand<'mutation', { cartId: string; qty?: number | undefined }, { orderId: number }, false>>()
+    expectTypeOf<BrandOf<typeof checkout>>().toEqualTypeOf<
+      UnitBrand<'mutation', { cartId: string; qty?: number | undefined }, { orderId: number }, false>
+    >()
 
     const asyncQuery = query({
       handler: async (ctx) => {
