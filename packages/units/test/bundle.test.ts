@@ -27,12 +27,26 @@ describe('bundle', () => {
       expect(typeof d['handler']).toBe('function')
     }
     expect(units['checkout']).toMatchObject({
-      kind: 'mutation', internal: false, description: '',
-      args: { type: 'object', properties: { cartId: { type: 'string', minLength: 1 }, note: { type: 'string' } }, required: ['cartId'], additionalProperties: false },
+      kind: 'mutation',
+      internal: false,
+      description: '',
+      args: {
+        type: 'object',
+        properties: { cartId: { type: 'string', minLength: 1 }, note: { type: 'string' } },
+        required: ['cartId'],
+        additionalProperties: false,
+      },
     })
     expect(units['myOrders']).toMatchObject({ kind: 'query', args: null, description: 'the caller’s orders' })
     expect(units['audit']).toMatchObject({ internal: true })
-    expect(units['paid']).toMatchObject({ kind: 'onChange', table: 'orders', ops: ['update'], mode: 'action', batch: 100, internal: true })
+    expect(units['paid']).toMatchObject({
+      kind: 'onChange',
+      table: 'orders',
+      ops: ['update'],
+      mode: 'action',
+      batch: 100,
+      internal: true,
+    })
     expect(units['nightly']).toMatchObject({ kind: 'schedule', cron: '0 3 * * *', every: '', mode: 'mutation' })
 
     // The manifest carries each callable unit's access, the default included.
@@ -40,7 +54,15 @@ describe('bundle', () => {
     expect(access).toMatchObject({ checkout: 'write', myOrders: 'read' })
     expect(access['nightly']).toBeUndefined()
     expect(manifestOf(evaluateBundle(b.bundle)).find((u) => u.name === 'paid')).toEqual({
-      name: 'paid', kind: 'onChange', internal: true, description: '', args: null, mode: 'action', table: 'orders', ops: ['update'], batch: 100,
+      name: 'paid',
+      kind: 'onChange',
+      internal: true,
+      description: '',
+      args: null,
+      mode: 'action',
+      table: 'orders',
+      ops: ['update'],
+      batch: 100,
     })
   })
 
@@ -64,7 +86,13 @@ describe('bundle', () => {
       }
     }
     expect(runInNewContext('run({ owner: "user:1", total: 10 })', ctx)).toEqual({ ok: true, value: { orderId: 7 } })
-    expect(runInNewContext('run(null)', ctx)).toEqual({ ok: false, name: 'UnitError', code: 'not_found', message: 'no such cart', data: { cartId: 'c1' } })
+    expect(runInNewContext('run(null)', ctx)).toEqual({
+      ok: false,
+      name: 'UnitError',
+      code: 'not_found',
+      message: 'no such cart',
+      data: { cartId: 'c1' },
+    })
   })
 
   test('the same sources make the same bundle from any working directory', async () => {
@@ -86,7 +114,13 @@ describe('bundle', () => {
     const pkg = fileURLToPath(new URL('..', import.meta.url))
     const out = mkdtempSync(join(pkg, '.dist-test-'))
     try {
-      await build({ entryPoints: [join(pkg, 'src/bundle.ts')], outfile: join(out, 'bundle.js'), format: 'esm', platform: 'node', logLevel: 'silent' })
+      await build({
+        entryPoints: [join(pkg, 'src/bundle.ts')],
+        outfile: join(out, 'bundle.js'),
+        format: 'esm',
+        platform: 'node',
+        logLevel: 'silent',
+      })
       const fromDist = (await import(pathToFileURL(join(out, 'bundle.js')).href)) as typeof import('../src/bundle.ts')
       for (const dir of [fixture('shop'), fileURLToPath(new URL('../../../examples/units/units', import.meta.url))]) {
         const a = await bundleUnits(dir)
@@ -123,13 +157,17 @@ describe('bundle', () => {
   })
 
   test('errors say where', async () => {
-    await expect(bundleUnits(join(tmpdir(), 'azora-units-does-not-exist'))).rejects.toThrow(/no units directory at .*create units\/index\.ts/)
+    await expect(bundleUnits(join(tmpdir(), 'azora-units-does-not-exist'))).rejects.toThrow(
+      /no units directory at .*create units\/index\.ts/,
+    )
     const empty = mkdtempSync(join(tmpdir(), 'azora-units-'))
     await expect(bundleUnits(empty)).rejects.toThrow(/no units in/)
     writeFileSync(join(empty, 'index.ts'), 'export const x = query({ handler: () => 1 \n')
     const err = await bundleUnits(empty).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(BundleError)
-    expect((err as Error).message).toMatch(/^bundling \/.*failed:\n\/.*index\.ts:2:1: Expected "\}" but found end of file$/)
+    expect((err as Error).message).toMatch(
+      /^bundling \/.*failed:\n\/.*index\.ts:2:1: Expected "\}" but found end of file$/,
+    )
     writeFileSync(join(empty, 'index.ts'), 'import { nope } from "./missing.ts"\nexport const x = nope')
     await expect(bundleUnits(empty)).rejects.toThrow(/index\.ts:1:\d+: Could not resolve "\.\/missing\.ts"/)
     writeFileSync(join(empty, 'index.ts'), 'export const x = 1')
