@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { Writer } from '../../src/codec.ts'
 import {
-  AzoraError, ClosedError, connect, TxExpiredError, UnknownOutcomeError, type ConnectOptions, type Database, type Transaction,
+  AzoraError,
+  ClosedError,
+  connect,
+  TxExpiredError,
+  UnknownOutcomeError,
+  type ConnectOptions,
+  type Database,
+  type Transaction,
 } from '../../src/index.ts'
 import { CLIENT_TX, decode, encode, MsgType, type Msg } from '../../src/messages.ts'
 import { FakeServer, type FakeConn } from '../helpers/fake-server.ts'
@@ -15,11 +22,52 @@ describe('transaction messages', () => {
   const vals = [null, -5, 2.5, 'héllo', Uint8Array.of(0, 255)]
   const samples: Array<[Msg, (w: Writer) => void]> = [
     [{ type: MsgType.TxBegin, reqId: 16 }, (w) => w.u(16)],
-    [{ type: MsgType.TxBegun, reqId: 16, txId: 2 ** 40, idleMs: 5000 }, (w) => { w.u(16); w.u(2 ** 40); w.u(5000) }],
-    [{ type: MsgType.TxStmt, reqId: 17, txId: 2 ** 40, sql: 'SELECT ?', args: vals, query: true }, (w) => { w.u(17); w.u(2 ** 40); w.s('SELECT ?'); w.vals(vals); w.flag(true) }],
-    [{ type: MsgType.TxStmt, reqId: 18, txId: 3, sql: 'DELETE FROM t', args: null, query: false }, (w) => { w.u(18); w.u(3); w.s('DELETE FROM t'); w.vals(null); w.flag(false) }],
-    [{ type: MsgType.TxEnd, reqId: 19, txId: 3, commit: true, mutation: 'm-4' }, (w) => { w.u(19); w.u(3); w.flag(true); w.s('m-4') }],
-    [{ type: MsgType.TxEnd, reqId: 20, txId: 3, commit: false, mutation: '' }, (w) => { w.u(20); w.u(3); w.flag(false); w.s('') }],
+    [
+      { type: MsgType.TxBegun, reqId: 16, txId: 2 ** 40, idleMs: 5000 },
+      (w) => {
+        w.u(16)
+        w.u(2 ** 40)
+        w.u(5000)
+      },
+    ],
+    [
+      { type: MsgType.TxStmt, reqId: 17, txId: 2 ** 40, sql: 'SELECT ?', args: vals, query: true },
+      (w) => {
+        w.u(17)
+        w.u(2 ** 40)
+        w.s('SELECT ?')
+        w.vals(vals)
+        w.flag(true)
+      },
+    ],
+    [
+      { type: MsgType.TxStmt, reqId: 18, txId: 3, sql: 'DELETE FROM t', args: null, query: false },
+      (w) => {
+        w.u(18)
+        w.u(3)
+        w.s('DELETE FROM t')
+        w.vals(null)
+        w.flag(false)
+      },
+    ],
+    [
+      { type: MsgType.TxEnd, reqId: 19, txId: 3, commit: true, mutation: 'm-4' },
+      (w) => {
+        w.u(19)
+        w.u(3)
+        w.flag(true)
+        w.s('m-4')
+      },
+    ],
+    [
+      { type: MsgType.TxEnd, reqId: 20, txId: 3, commit: false, mutation: '' },
+      (w) => {
+        w.u(20)
+        w.u(3)
+        w.flag(false)
+        w.s('')
+      },
+    ],
   ]
 
   test('type numbers and field order', () => {
@@ -40,14 +88,24 @@ describe('transaction messages', () => {
   test('every strict prefix and any trailing byte is refused', () => {
     for (const [m] of samples) {
       const b = encode(m)
-      for (let n = 0; n < b.length; n++) expect(() => decode(b.subarray(0, n)), `type ${m.type} cut to ${n}`).toThrow(/malformed/)
+      for (let n = 0; n < b.length; n++)
+        expect(() => decode(b.subarray(0, n)), `type ${m.type} cut to ${n}`).toThrow(/malformed/)
       expect(() => decode(Uint8Array.of(...b, 0))).toThrow(/trailing/)
     }
     expect(() => decode(Uint8Array.of(MsgType.TxEnd, 1, 1, 2, 0))).toThrow(/bad flag 2/)
   })
 
   test('Welcome carries the idle lease as a trailing field, only when set', () => {
-    const old: Msg = { type: MsgType.Welcome, sessionId: 's1', serverTimeMs: 0, heartbeatMs: 15000, maxMessage: 1 << 20, principal: 'p', scopes: ['read'], maxSubscriptions: 100 }
+    const old: Msg = {
+      type: MsgType.Welcome,
+      sessionId: 's1',
+      serverTimeMs: 0,
+      heartbeatMs: 15000,
+      maxMessage: 1 << 20,
+      principal: 'p',
+      scopes: ['read'],
+      maxSubscriptions: 100,
+    }
     const ob = encode(old)
     expect(hex(encode({ ...old, txIdleMs: 0 }))).toBe(hex(ob)) // byte for byte the older layout
     const nb = encode({ ...old, txIdleMs: 5000 })
@@ -60,15 +118,41 @@ describe('transaction messages', () => {
 })
 
 type Req<T extends number> = Extract<Msg, { type: T }>
-const result = (reqId: number, rows: Array<Array<number | string | null>> = [], extra: Partial<Req<typeof MsgType.Result>> = {}): Msg => ({
-  type: MsgType.Result, reqId, columns: ['v'], rows, truncated: false, rowsAffected: 0, lastInsertId: 0, replayed: false, ...extra,
+const result = (
+  reqId: number,
+  rows: Array<Array<number | string | null>> = [],
+  extra: Partial<Req<typeof MsgType.Result>> = {},
+): Msg => ({
+  type: MsgType.Result,
+  reqId,
+  columns: ['v'],
+  rows,
+  truncated: false,
+  rowsAffected: 0,
+  lastInsertId: 0,
+  replayed: false,
+  ...extra,
 })
-const error = (reqId: number, code: string, message = code): Msg => ({ type: MsgType.Error, reqId, code, message, fatal: false, retryAfterMs: 0 })
+const error = (reqId: number, code: string, message = code): Msg => ({
+  type: MsgType.Error,
+  reqId,
+  code,
+  message,
+  fatal: false,
+  retryAfterMs: 0,
+})
 
 let open: Database[] = []
 async function client(server: FakeServer, o: Partial<ConnectOptions> = {}): Promise<Database> {
   const db = await connect({
-    database: 'shop', allowPlaintext: true, apiKey: 'k', transport: server.transport, reconnectMinMs: 1, reconnectMaxMs: 5, onError: () => {}, ...o,
+    database: 'shop',
+    allowPlaintext: true,
+    apiKey: 'k',
+    transport: server.transport,
+    reconnectMinMs: 1,
+    reconnectMaxMs: 5,
+    onError: () => {},
+    ...o,
   })
   open.push(db)
   return db
@@ -85,13 +169,16 @@ function txServer(): FakeServer {
   let txId = 0
   s.onMessage = (m, c) => {
     if (m.type === MsgType.TxBegin) c.send({ type: MsgType.TxBegun, reqId: m.reqId, txId: ++txId, idleMs: 5000 })
-    else if (m.type === MsgType.TxStmt) c.send(m.query ? result(m.reqId, [[m.sql]]) : result(m.reqId, [], { rowsAffected: 1, lastInsertId: 7 }))
-    else if (m.type === MsgType.TxEnd) c.send(m.commit ? result(m.reqId, [], { rowsAffected: 2 }) : { type: MsgType.OK, reqId: m.reqId })
+    else if (m.type === MsgType.TxStmt)
+      c.send(m.query ? result(m.reqId, [[m.sql]]) : result(m.reqId, [], { rowsAffected: 1, lastInsertId: 7 }))
+    else if (m.type === MsgType.TxEnd)
+      c.send(m.commit ? result(m.reqId, [], { rowsAffected: 2 }) : { type: MsgType.OK, reqId: m.reqId })
     else if (m.type === MsgType.Query) c.send(result(m.reqId, [[m.sql]]))
   }
   return s
 }
-const txMsgs = (c: FakeConn): Msg[] => c.received.filter((m) => m.type === MsgType.TxBegin || m.type === MsgType.TxStmt || m.type === MsgType.TxEnd)
+const txMsgs = (c: FakeConn): Msg[] =>
+  c.received.filter((m) => m.type === MsgType.TxBegin || m.type === MsgType.TxStmt || m.type === MsgType.TxEnd)
 
 describe('db.tx', () => {
   test('begins, runs the statements on the transaction, commits and returns the value', async () => {
@@ -99,17 +186,23 @@ describe('db.tx', () => {
     const db = await client(s, { clientName: 'my-app/2' })
     expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, client: `my-app/2 ${CLIENT_TX}` })
     expect(db.session?.txIdleMs).toBe(5000)
-    const out = await db.tx(async (tx) => {
-      expect(tx.idleMs).toBe(5000)
-      const rows = await tx.query('SELECT a', [1])
-      const one = await tx.queryOne({ sql: 'SELECT b', args: [] })
-      const v = await tx.queryValue('SELECT c')
-      const raw = await tx.queryRaw('SELECT d')
-      const w = await tx.exec('INSERT INTO t VALUES (?)', ['x'])
-      return { rows, one, v, raw, w }
-    }, { mutationId: 'order-1' })
+    const out = await db.tx(
+      async (tx) => {
+        expect(tx.idleMs).toBe(5000)
+        const rows = await tx.query('SELECT a', [1])
+        const one = await tx.queryOne({ sql: 'SELECT b', args: [] })
+        const v = await tx.queryValue('SELECT c')
+        const raw = await tx.queryRaw('SELECT d')
+        const w = await tx.exec('INSERT INTO t VALUES (?)', ['x'])
+        return { rows, one, v, raw, w }
+      },
+      { mutationId: 'order-1' },
+    )
     expect(out).toEqual({
-      rows: [{ v: 'SELECT a' }], one: { v: 'SELECT b' }, v: 'SELECT c', raw: { columns: ['v'], rows: [['SELECT d']], truncated: false },
+      rows: [{ v: 'SELECT a' }],
+      one: { v: 'SELECT b' },
+      v: 'SELECT c',
+      raw: { columns: ['v'], rows: [['SELECT d']], truncated: false },
       w: { rowsAffected: 1, lastInsertId: 7, replayed: false },
     })
     expect(txMsgs(s.last)).toMatchObject([
@@ -129,14 +222,17 @@ describe('db.tx', () => {
     const s = txServer()
     const db = await client(s)
     const boom = new Error('sold out')
-    await expect(db.tx(async (tx) => {
-      await tx.exec('UPDATE t SET v = 1')
-      throw boom
-    })).rejects.toBe(boom)
+    await expect(
+      db.tx(async (tx) => {
+        await tx.exec('UPDATE t SET v = 1')
+        throw boom
+      }),
+    ).rejects.toBe(boom)
     expect(txMsgs(s.last).at(-1)).toMatchObject({ type: MsgType.TxEnd, txId: 1, commit: false, mutation: '' })
     // A statement's error leaves the transaction open: caught, the transaction still commits.
     const plain = s.onMessage
-    s.onMessage = (m, c) => (m.type === MsgType.TxStmt && m.sql === 'bad' ? c.send(error(m.reqId, 'invalid')) : plain(m, c))
+    s.onMessage = (m, c) =>
+      m.type === MsgType.TxStmt && m.sql === 'bad' ? c.send(error(m.reqId, 'invalid')) : plain(m, c)
     await db.tx(async (tx) => {
       const e = await tx.exec('bad').catch((x: unknown) => x)
       expect(e).toBeInstanceOf(AzoraError)
@@ -155,10 +251,12 @@ describe('db.tx', () => {
     })
     await expect(kept?.query('SELECT 1')).rejects.toThrow(ClosedError)
     await expect(kept?.exec('DELETE FROM t')).rejects.toThrow(/the transaction has ended \(committed\)/)
-    await db.tx((tx) => {
-      kept = tx
-      throw new Error('no')
-    }).catch(() => {})
+    await db
+      .tx((tx) => {
+        kept = tx
+        throw new Error('no')
+      })
+      .catch(() => {})
     await expect(kept?.queryValue('SELECT 1')).rejects.toThrow(/the transaction has ended \(rolled back\)/)
     expect(txMsgs(s.last).filter((m) => m.type === MsgType.TxStmt)).toHaveLength(0)
   })
@@ -169,11 +267,16 @@ describe('db.tx', () => {
     const db = await client(s)
     expect(db.session?.txIdleMs).toBe(0)
     let ran = false
-    const e = await db.tx(() => {
-      ran = true
-    }).catch((x: unknown) => x)
+    const e = await db
+      .tx(() => {
+        ran = true
+      })
+      .catch((x: unknown) => x)
     expect(e).toBeInstanceOf(AzoraError)
-    expect(e).toMatchObject({ code: 'unavailable', message: expect.stringMatching(/does not support interactive transactions/) })
+    expect(e).toMatchObject({
+      code: 'unavailable',
+      message: expect.stringMatching(/does not support interactive transactions/),
+    })
     expect(ran).toBe(false)
     expect(txMsgs(s.last)).toHaveLength(0)
     expect(await db.queryValue('SELECT 1')).toBe('SELECT 1')
@@ -183,30 +286,43 @@ describe('db.tx', () => {
     const s = txServer()
     const plain = s.onMessage
     s.onMessage = (m, c) => {
-      if ((m.type === MsgType.TxStmt && m.sql === 'late') || m.type === MsgType.TxEnd) c.send(error(m.reqId, 'tx_expired', 'the transaction was idle for 5s'))
+      if ((m.type === MsgType.TxStmt && m.sql === 'late') || m.type === MsgType.TxEnd)
+        c.send(error(m.reqId, 'tx_expired', 'the transaction was idle for 5s'))
       else plain(m, c)
     }
     const db = await client(s)
     let second: unknown
-    const first = await db.tx(async (tx) => {
-      await tx.exec('early')
-      try {
-        await tx.exec('late')
-      } catch (e) {
-        second = await tx.exec('never sent').catch((x: unknown) => x)
-        throw e
-      }
-    }).catch((x: unknown) => x)
+    const first = await db
+      .tx(async (tx) => {
+        await tx.exec('early')
+        try {
+          await tx.exec('late')
+        } catch (e) {
+          second = await tx.exec('never sent').catch((x: unknown) => x)
+          throw e
+        }
+      })
+      .catch((x: unknown) => x)
     expect(first).toBeInstanceOf(TxExpiredError)
-    expect(first).toMatchObject({ name: 'TxExpiredError', code: 'tx_expired', message: 'tx_expired: the transaction was idle for 5s' })
+    expect(first).toMatchObject({
+      name: 'TxExpiredError',
+      code: 'tx_expired',
+      message: 'tx_expired: the transaction was idle for 5s',
+    })
     expect(second).toBe(first) // fails at once, without asking the server
-    expect(txMsgs(s.last).map((m) => (m.type === MsgType.TxStmt ? m.sql : m.type))).toEqual([MsgType.TxBegin, 'early', 'late'])
+    expect(txMsgs(s.last).map((m) => (m.type === MsgType.TxStmt ? m.sql : m.type))).toEqual([
+      MsgType.TxBegin,
+      'early',
+      'late',
+    ])
     // The lease runs out between the last statement and the commit.
     await expect(db.tx((tx) => tx.exec('early'))).rejects.toBeInstanceOf(TxExpiredError)
     // The callback throws and the rollback finds the transaction gone: only the callback's error shows.
-    await expect(db.tx(() => {
-      throw new Error('mine')
-    })).rejects.toThrow('mine')
+    await expect(
+      db.tx(() => {
+        throw new Error('mine')
+      }),
+    ).rejects.toThrow('mine')
   })
 
   test('a dropped connection ends the transaction: nothing is replayed on the new one', async () => {
@@ -215,16 +331,18 @@ describe('db.tx', () => {
     s.onMessage = (m, c) => (m.type === MsgType.TxStmt && m.sql === 'drop' ? c.drop() : plain(m, c))
     const db = await client(s)
     let after: unknown
-    const e = await db.tx(async (tx) => {
-      await tx.exec('first')
-      try {
-        await tx.exec('drop')
-      } catch (err) {
-        await until(() => s.accepted === 2 && db.connected, 'the reconnect')
-        after = await tx.query('SELECT 1').catch((x: unknown) => x)
-        throw err
-      }
-    }).catch((x: unknown) => x)
+    const e = await db
+      .tx(async (tx) => {
+        await tx.exec('first')
+        try {
+          await tx.exec('drop')
+        } catch (err) {
+          await until(() => s.accepted === 2 && db.connected, 'the reconnect')
+          after = await tx.query('SELECT 1').catch((x: unknown) => x)
+          throw err
+        }
+      })
+      .catch((x: unknown) => x)
     expect(e).toBeInstanceOf(TxExpiredError)
     expect((e as Error).message).toMatch(/connection that held the transaction was lost/)
     expect(after).toBeInstanceOf(TxExpiredError)
@@ -280,17 +398,20 @@ describe('db.tx', () => {
       free = r
     })
     let inside = 0
-    const both = [0, 1].map(() => pool.tx(async (tx) => {
-      inside++
-      await hold
-      await tx.exec('w')
-    }))
+    const both = [0, 1].map(() =>
+      pool.tx(async (tx) => {
+        inside++
+        await hold
+        await tx.exec('w')
+      }),
+    )
     await until(() => inside === 2, 'both transactions open at once')
     expect(p.conns.map((c) => txMsgs(c).length)).toEqual([1, 1])
     free()
     await Promise.all(both)
     expect(p.conns.map((c) => txMsgs(c).map((m) => m.type))).toEqual([
-      [MsgType.TxBegin, MsgType.TxStmt, MsgType.TxEnd], [MsgType.TxBegin, MsgType.TxStmt, MsgType.TxEnd],
+      [MsgType.TxBegin, MsgType.TxStmt, MsgType.TxEnd],
+      [MsgType.TxBegin, MsgType.TxStmt, MsgType.TxEnd],
     ])
   })
 
