@@ -21,11 +21,17 @@ const open = await db.live<Order>('orders', { where: "status = 'open'", orderBy:
 
 const render = (): void => {
   console.log(`\n${open.rows.length} open orders, ${open.rows.reduce((s, o) => s + o.total, 0).toFixed(2)} in total`)
-  for (const o of open.rows.slice(0, 6)) console.log(`  #${String(o.id).padEnd(4)} customer ${String(o.customer).padEnd(3)} ${o.total.toFixed(2).padStart(8)}  ${o.note ?? ''}`)
+  for (const o of open.rows.slice(0, 6))
+    console.log(
+      `  #${String(o.id).padEnd(4)} customer ${String(o.customer).padEnd(3)} ${o.total.toFixed(2).padStart(8)}  ${o.note ?? ''}`,
+    )
 }
 render()
 open.subscribe(({ changes }) => {
-  for (const c of changes) console.log(`  ${c.op.padEnd(6)} #${c.key[0]}${c.op === 'update' ? `: ${c.previous?.total.toFixed(2)} -> ${c.row?.total.toFixed(2)}` : ''}`)
+  for (const c of changes)
+    console.log(
+      `  ${c.op.padEnd(6)} #${c.key[0]}${c.op === 'update' ? `: ${c.previous?.total.toFixed(2)} -> ${c.row?.total.toFixed(2)}` : ''}`,
+    )
   render()
 })
 
@@ -34,7 +40,12 @@ const writer = await connectEnv()
 const notes = ['Laptop stand', 'USB-C dock', 'Desk lamp', 'Webcam', 'Keyboard tray']
 for (let i = 0; i < 5; i++) {
   await new Promise((r) => setTimeout(r, 400))
-  const { lastInsertId } = await writer.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [100 + i, 'open', 20 + i * 35.5, notes[i]!])
+  const { lastInsertId } = await writer.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [
+    100 + i,
+    'open',
+    20 + i * 35.5,
+    notes[i]!,
+  ])
   if (i % 2 === 1) {
     // One transaction, one event: the price change and the payment of another order arrive together.
     await writer.batch([
