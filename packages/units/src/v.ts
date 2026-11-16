@@ -70,7 +70,10 @@ function objectSchema(shape: Shape): JsonSchema {
   const properties: JsonSchema = {}
   const required: string[] = []
   for (const [k, val] of Object.entries(shape)) {
-    if (!isValidator(val)) throw new TypeError(`azora units: property ${JSON.stringify(k)} is not a validator (use v.string(), v.number(), ...)`)
+    if (!isValidator(val))
+      throw new TypeError(
+        `azora units: property ${JSON.stringify(k)} is not a validator (use v.string(), v.number(), ...)`,
+      )
     properties[k] = val.schema
     if (!val.optional) required.push(k)
   }
@@ -118,7 +121,10 @@ export const v = {
     return make({ enum: [...values] }, o)
   },
   /** An array of items; `min`/`max` bound its length. */
-  array<I extends Validator<any, boolean>>(items: I, o?: Described & { min?: number; max?: number }): Validator<Infer<I>[], false> {
+  array<I extends Validator<any, boolean>>(
+    items: I,
+    o?: Described & { min?: number; max?: number },
+  ): Validator<Infer<I>[], false> {
     return make(bounds({ type: 'array', items: items.schema }, 'minItems', 'maxItems', o), o)
   },
   /** An object with these properties and no others. */
@@ -138,7 +144,9 @@ export const v = {
     return make({ anyOf: [inner.schema, { type: 'null' }] }, o)
   },
   /** Any of these. */
-  union<const U extends readonly [Validator<any, boolean>, ...Validator<any, boolean>[]]>(...members: U): Validator<Infer<U[number]>, false> {
+  union<const U extends readonly [Validator<any, boolean>, ...Validator<any, boolean>[]]>(
+    ...members: U
+  ): Validator<Infer<U[number]>, false> {
     return make({ anyOf: members.map((m) => m.schema) })
   },
   /** Anything. */
