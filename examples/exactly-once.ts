@@ -30,13 +30,17 @@ async function flush(db: Database): Promise<void> {
   if (!existsSync(OUTBOX)) return
   for (const t of JSON.parse(readFileSync(OUTBOX, 'utf8')) as Queued[]) {
     const r = await db.batch(transfer(t), { mutationId: t.mutationId })
-    console.log(`  ${t.src} -> ${t.dst} ${t.amount}: ${r.replayed ? 'already applied, answered from the first run' : 'applied'}`)
+    console.log(
+      `  ${t.src} -> ${t.dst} ${t.amount}: ${r.replayed ? 'already applied, answered from the first run' : 'applied'}`,
+    )
   }
   rmSync(OUTBOX)
 }
 
 const balances = async (db: Database): Promise<string> =>
-  (await db.query<{ id: string; balance: number }>('SELECT id, balance FROM accounts ORDER BY id')).map((a) => `${a.id}=${a.balance}`).join('  ')
+  (await db.query<{ id: string; balance: number }>('SELECT id, balance FROM accounts ORDER BY id'))
+    .map((a) => `${a.id}=${a.balance}`)
+    .join('  ')
 
 let db = await connectEnv() // AZORA_URL and AZORA_TOKEN
 console.log('before:        ', await balances(db))
