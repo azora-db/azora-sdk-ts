@@ -49,16 +49,16 @@ constructor with the `webSocket` option.
 
 A client needs two values:
 
-| Value | | What it is |
-|---|---|---|
-| `AZORA_URL` | public | Where the database is: `https://db.example.com/shop?key=<server key>` |
-| `AZORA_TOKEN` | private | Who the client is: an API key (`azk_…`) or a client token (`azt1.…`) |
+| Value         |         | What it is                                                            |
+| ------------- | ------- | --------------------------------------------------------------------- |
+| `AZORA_URL`   | public  | Where the database is: `https://db.example.com/shop?key=<server key>` |
+| `AZORA_TOKEN` | private | Who the client is: an API key (`azk_…`) or a client token (`azt1.…`)  |
 
 ```ts
 import { connect, connectEnv } from '@azora-db/client'
 
 const db = await connect('https://db.example.com/shop?key=<server key>', { token: process.env.AZORA_TOKEN })
-const db = await connectEnv()   // reads AZORA_URL and AZORA_TOKEN
+const db = await connectEnv() // reads AZORA_URL and AZORA_TOKEN
 ```
 
 On the server, `azora connect <database> --key <name>` creates an API key
@@ -87,12 +87,12 @@ browsers), and [file storage](#file-storage) uses the same address.
 are encrypted inside the WebSocket, so a TLS-terminating proxy or CDN only
 sees ciphertext. The URL says how the key is checked:
 
-| In the URL | Handshake | Use |
-|---|---|---|
-| `?key=<server key>` | Noise IK, one round trip | Pin the server's public key. The connection fails unless the server holds the private key. |
-| `?fp=azp1-…` | Noise XX | The server sends its key and the client checks the fingerprint. |
-| no key | Noise IK | The client first reads the key from `<address>/.well-known/azora.json`. **Only over `https` or to a loopback address.** |
-| `?plaintext=1` | none | Tests and loopback only; the server and the database must allow it too. |
+| In the URL          | Handshake                | Use                                                                                                                     |
+| ------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `?key=<server key>` | Noise IK, one round trip | Pin the server's public key. The connection fails unless the server holds the private key.                              |
+| `?fp=azp1-…`        | Noise XX                 | The server sends its key and the client checks the fingerprint.                                                         |
+| no key              | Noise IK                 | The client first reads the key from `<address>/.well-known/azora.json`. **Only over `https` or to a loopback address.** |
+| `?plaintext=1`      | none                     | Tests and loopback only; the server and the database must allow it too.                                                 |
 
 A URL without a key (`https://db.example.com/shop`) trusts the TLS
 certificate to vouch for the key the server reports, so it is accepted
@@ -135,12 +135,12 @@ engine's TCP port, which is somewhat faster than the WebSocket (see
 itself and always carry `key`, `fp` or `plaintext`; with `azora://`, file
 storage needs the `storageUrl` option:
 
-| Connection string | Transport |
-|---|---|
-| `azora://host[:7480]/<database>?key=…` | TCP (Node, Bun, Deno) |
+| Connection string                        | Transport                                       |
+| ---------------------------------------- | ----------------------------------------------- |
+| `azora://host[:7480]/<database>?key=…`   | TCP (Node, Bun, Deno)                           |
 | `wss://host[/rt/v1]?db=<database>&key=…` | WebSocket over TLS, the endpoint given directly |
-| `ws://host[/rt/v1]?db=<database>&key=…` | plain WebSocket |
-| `azoras+ws://…`, `azora+ws://…` | the same two, in the engine's own spelling |
+| `ws://host[/rt/v1]?db=<database>&key=…`  | plain WebSocket                                 |
+| `azoras+ws://…`, `azora+ws://…`          | the same two, in the engine's own spelling      |
 
 Every part of a URL can also be an option (`host`, `port`, `webSocketUrl`,
 `database`, `serverKey`, `fingerprint`, `storageUrl`, …); options win over
@@ -158,10 +158,10 @@ the connection. `await db.close()` ends it.
 ## Reading
 
 ```ts
-const orders = await db.query<Order>('SELECT * FROM orders WHERE customer = ?', [42])   // objects
-const order  = await db.queryOne<Order>('SELECT * FROM orders WHERE id = ?', [7])        // or undefined
-const count  = await db.queryValue<number>('SELECT count(*) FROM orders')                // first cell
-const raw    = await db.queryRaw('SELECT id, total FROM orders', [], { maxRows: 500 })   // { columns, rows, truncated }
+const orders = await db.query<Order>('SELECT * FROM orders WHERE customer = ?', [42]) // objects
+const order = await db.queryOne<Order>('SELECT * FROM orders WHERE id = ?', [7]) // or undefined
+const count = await db.queryValue<number>('SELECT count(*) FROM orders') // first cell
+const raw = await db.queryRaw('SELECT id, total FROM orders', [], { maxRows: 500 }) // { columns, rows, truncated }
 ```
 
 The `sql` tag turns interpolated values into arguments, so they are never
@@ -169,20 +169,20 @@ part of the statement text:
 
 ```ts
 await db.query(sql`SELECT * FROM orders WHERE status = ${status} AND id IN (${sql.join(ids)})`)
-sql`SELECT * FROM ${sql.id(table)} WHERE ${where}`   // identifiers and nested statements
+sql`SELECT * FROM ${sql.id(table)} WHERE ${where}` // identifiers and nested statements
 ```
 
 Values map to SQLite's types:
 
-| JavaScript | SQLite |
-|---|---|
-| `null`, `undefined` | NULL |
-| `number` that is a safe integer, `bigint` | INTEGER (64-bit) |
-| any other `number` | REAL |
-| `string` | TEXT |
-| `Uint8Array`, `ArrayBuffer`, typed arrays | BLOB |
-| `boolean` | 1 or 0 |
-| `Date` | TEXT, ISO 8601 (`2026-01-02T03:04:05.000Z`) |
+| JavaScript                                | SQLite                                      |
+| ----------------------------------------- | ------------------------------------------- |
+| `null`, `undefined`                       | NULL                                        |
+| `number` that is a safe integer, `bigint` | INTEGER (64-bit)                            |
+| any other `number`                        | REAL                                        |
+| `string`                                  | TEXT                                        |
+| `Uint8Array`, `ArrayBuffer`, typed arrays | BLOB                                        |
+| `boolean`                                 | 1 or 0                                      |
+| `Date`                                    | TEXT, ISO 8601 (`2026-01-02T03:04:05.000Z`) |
 
 Coming back, integers are `number` while that is exact and `bigint` beyond
 2^53; blobs are `Uint8Array`. A value comes back as SQLite stores it,
@@ -197,9 +197,14 @@ connection if the connection drops.
 ## Writing
 
 ```ts
-const { rowsAffected, lastInsertId } = await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [42, 'open', 129.9])
+const { rowsAffected, lastInsertId } = await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [
+  42,
+  'open',
+  129.9,
+])
 
-await db.batch([                                   // one transaction: all or nothing
+await db.batch([
+  // one transaction: all or nothing
   ['UPDATE accounts SET balance = balance - ? WHERE id = ?', [2500, 'alice']],
   ['UPDATE accounts SET balance = balance + ? WHERE id = ?', [2500, 'bob']],
   sql`INSERT INTO transfers(src, dst, amount) VALUES (${'alice'}, ${'bob'}, ${2500})`,
@@ -235,10 +240,10 @@ nobody else sees them before the commit.
 ```ts
 const left = await db.tx(async (tx) => {
   const qty = await tx.queryValue<number>('SELECT qty FROM stock WHERE sku = ?', [sku])
-  if (!qty) throw new Error('sold out')            // throwing rolls back
+  if (!qty) throw new Error('sold out') // throwing rolls back
   await tx.exec('UPDATE stock SET qty = qty - 1 WHERE sku = ?', [sku])
   await tx.exec('INSERT INTO orders(sku) VALUES (?)', [sku])
-  return qty - 1                                   // resolving commits
+  return qty - 1 // resolving commits
 })
 ```
 
@@ -350,8 +355,8 @@ const open = await db.live<Order>('orders', {
     if (!r.match) console.warn('orders: checksum mismatch, resyncing', r)
   },
 })
-open.lastVerify   // result of the last periodic check, or null
-open.mismatches   // 0 in normal operation
+open.lastVerify // result of the last periodic check, or null
+open.mismatches // 0 in normal operation
 ```
 
 A mismatch means a bug or corruption, never normal operation: the query
@@ -377,18 +382,18 @@ restarts.
 const sub = await db.subscribe({ table: 'orders', where: eq('customer', 42) })
 for await (const update of sub) {
   if (update.reset) store.clear()
-  for (const c of update.changes) store.apply(c)       // c.op, c.key, c.new, c.old, c.columns
+  for (const c of update.changes) store.apply(c) // c.op, c.key, c.new, c.old, c.columns
   await store.saveResumePoint(update.checkpoint, update.epoch)
 }
 ```
 
-| Spec | Delivers |
-|---|---|
-| `{}` | every published table |
-| `{ table, where? }` | one table, optionally filtered |
-| `{ table, key: [...] }` | one row by primary key |
-| `{ bucket?, pathPrefix? }` | stored files |
-| `{ tables: [...] }` | "these tables changed" notifications (see `watch`) |
+| Spec                       | Delivers                                           |
+| -------------------------- | -------------------------------------------------- |
+| `{}`                       | every published table                              |
+| `{ table, where? }`        | one table, optionally filtered                     |
+| `{ table, key: [...] }`    | one row by primary key                             |
+| `{ bucket?, pathPrefix? }` | stored files                                       |
+| `{ tables: [...] }`        | "these tables changed" notifications (see `watch`) |
 
 - The first update is a snapshot (`reset` and `snapshot` set) unless you
   resume with `since` and `epoch` from a stored update, or pass
@@ -457,7 +462,7 @@ results from what the handlers return. `db.call` takes any name, untyped.
 
 ```ts
 const db = await connectEnv<typeof import('./units')>()
-const { orderId } = await db.units.checkout({ cartId: 'c1' })   // { cartId: string } => { orderId: number }
+const { orderId } = await db.units.checkout({ cartId: 'c1' }) // { cartId: string } => { orderId: number }
 const orders = await db.units.myOrders()
 await db.call<{ orderId: number }>('checkout', { cartId: 'c1' }, { mutationId: 'cart-c1' })
 ```
@@ -527,7 +532,7 @@ import { createTestEnv } from '@azora-db/units/testing'
 const t = createTestEnv(units, { schema: ['CREATE TABLE carts(...)'], auth: { subject: 'user:42' } })
 const { orderId } = await t.call('checkout', { cartId: 'c1' })
 t.db.all('SELECT * FROM orders')
-await t.advance(24 * 3600e3)   // runs the jobs that fall due
+await t.advance(24 * 3600e3) // runs the jobs that fall due
 ```
 
 [`examples/units`](examples/units) is a complete shop: a customer token
@@ -620,8 +625,14 @@ into a row in the same transaction:
 
 ```ts
 // backend
-const { url } = await db.storage.signUploadUrl({ maxSize: 2 << 20, allowedTypes: 'image/png,image/jpeg',
-  table: 'users', column: 'avatar', keyValue: '42', ttlSeconds: 300 })
+const { url } = await db.storage.signUploadUrl({
+  maxSize: 2 << 20,
+  allowedTypes: 'image/png,image/jpeg',
+  table: 'users',
+  column: 'avatar',
+  keyValue: '42',
+  ttlSeconds: 300,
+})
 // browser
 import { uploadToSignedUrl } from '@azora-db/client'
 await uploadToSignedUrl(url, file)
@@ -643,16 +654,16 @@ links with the rows.
 
 ## Errors, timeouts and cancellation
 
-| Error | Meaning |
-|---|---|
-| `AzoraError` | The server refused the request. `code` is stable: `invalid` (bad SQL, constraint), `unauthenticated`, `permission_denied`, `not_found`, `resource_exhausted`, `unavailable`, `gone`, `conflict`, `internal`. `isCode(err, 'invalid')` narrows. |
-| `HandshakeError` | The server could not prove it holds the expected key. |
-| `ConnectionError` | The server could not be reached, or did not report its key for a URL without one (only from `connect`). |
-| `TimeoutError` | The call ran past its timeout. When the client was disconnected, the message says why. |
-| `UnitError` | A [unit](#units) threw: `code`, `message`, `data`, `unit`. |
-| `UnknownOutcomeError` | A schema change, a transaction's commit or a `unitsAdmin` change was sent and the connection dropped before its answer. |
-| `TxExpiredError` | A [transaction](#transactions) was rolled back by the server: its lease ran out or its connection was lost. |
-| `ClosedError` | The database or subscription was closed. |
+| Error                 | Meaning                                                                                                                                                                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AzoraError`          | The server refused the request. `code` is stable: `invalid` (bad SQL, constraint), `unauthenticated`, `permission_denied`, `not_found`, `resource_exhausted`, `unavailable`, `gone`, `conflict`, `internal`. `isCode(err, 'invalid')` narrows. |
+| `HandshakeError`      | The server could not prove it holds the expected key.                                                                                                                                                                                          |
+| `ConnectionError`     | The server could not be reached, or did not report its key for a URL without one (only from `connect`).                                                                                                                                        |
+| `TimeoutError`        | The call ran past its timeout. When the client was disconnected, the message says why.                                                                                                                                                         |
+| `UnitError`           | A [unit](#units) threw: `code`, `message`, `data`, `unit`.                                                                                                                                                                                     |
+| `UnknownOutcomeError` | A schema change, a transaction's commit or a `unitsAdmin` change was sent and the connection dropped before its answer.                                                                                                                        |
+| `TxExpiredError`      | A [transaction](#transactions) was rolled back by the server: its lease ran out or its connection was lost.                                                                                                                                    |
+| `ClosedError`         | The database or subscription was closed.                                                                                                                                                                                                       |
 
 Every call takes `{ signal, timeoutMs }`. Rate limits (`resource_exhausted`
 with a retry hint) and a database that is briefly unavailable are retried
@@ -692,16 +703,16 @@ Measured with `pnpm bench` on one machine shared by engine and client
 (Node 24, a 10,000-row table, the engine's per-connection rate limit
 lifted). Take the ratios, not the absolutes:
 
-| Operation | Rate | p50 | p99 |
-|---|---|---|---|
-| Point read, TCP, one at a time | 5,200 /s | 0.15 ms | 1.0 ms |
-| Point read, TCP, 64 concurrent | 18,600 /s | 2.9 ms | 10.5 ms |
-| Point read, WebSocket, 64 concurrent | 15,300 /s | 3.4 ms | 16 ms |
-| Point read, plaintext TCP, 64 concurrent | 27,200 /s | 2.0 ms | 6.9 ms |
-| 1,000-row read | 1,000 /s (a million rows/s) | 3.1 ms | 16 ms |
-| Single-row write, 16 concurrent | 5,200 /s | 2.5 ms | 13 ms |
-| 10-statement batch | 4,500 /s | 0.7 ms | 3.4 ms |
-| Commit to live-query delivery, including the write | | 0.5 ms | 1.8 ms |
+| Operation                                          | Rate                        | p50     | p99     |
+| -------------------------------------------------- | --------------------------- | ------- | ------- |
+| Point read, TCP, one at a time                     | 5,200 /s                    | 0.15 ms | 1.0 ms  |
+| Point read, TCP, 64 concurrent                     | 18,600 /s                   | 2.9 ms  | 10.5 ms |
+| Point read, WebSocket, 64 concurrent               | 15,300 /s                   | 3.4 ms  | 16 ms   |
+| Point read, plaintext TCP, 64 concurrent           | 27,200 /s                   | 2.0 ms  | 6.9 ms  |
+| 1,000-row read                                     | 1,000 /s (a million rows/s) | 3.1 ms  | 16 ms   |
+| Single-row write, 16 concurrent                    | 5,200 /s                    | 2.5 ms  | 13 ms   |
+| 10-statement batch                                 | 4,500 /s                    | 0.7 ms  | 3.4 ms  |
+| Commit to live-query delivery, including the write |                             | 0.5 ms  | 1.8 ms  |
 
 - Encryption costs about a third of the throughput of small requests.
   Small frames are encrypted in JavaScript and large ones with the
@@ -724,16 +735,16 @@ node --env-file=examples/.env examples/quickstart.ts     # in another terminal
 `examples/.env` holds `AZORA_URL` and `AZORA_TOKEN`, and every example
 connects with those two values (`connectEnv()`).
 
-| Example | Shows |
-|---|---|
-| [`quickstart.ts`](examples/quickstart.ts) | `connectEnv`, query, `sql`, exec, batch |
-| [`live-orders.ts`](examples/live-orders.ts) | a live query in the terminal, checksum verification |
-| [`exactly-once.ts`](examples/exactly-once.ts) | an outbox with persisted mutation ids replayed after a crash |
-| [`files.ts`](examples/files.ts) | uploads, signed URLs, resumable upload, ranges, through the same URL |
-| [`tokens.ts`](examples/tokens.ts) | the same URL with a client token pinned to one customer's rows |
-| [`watch.ts`](examples/watch.ts) | an aggregate kept fresh with `watch` |
-| [`units/`](examples/units) | units: publish a shop's units, call them with the API key and with a customer token that cannot run SQL, schedule jobs (`node --env-file=examples/.env examples/units/shop.ts`); test them without an engine (`cd examples/units && pnpm test`) |
-| [`web/`](examples/web) | a React orders board in the browser: `cd examples/web && pnpm install && pnpm dev` |
+| Example                                       | Shows                                                                                                                                                                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`quickstart.ts`](examples/quickstart.ts)     | `connectEnv`, query, `sql`, exec, batch                                                                                                                                                                                                         |
+| [`live-orders.ts`](examples/live-orders.ts)   | a live query in the terminal, checksum verification                                                                                                                                                                                             |
+| [`exactly-once.ts`](examples/exactly-once.ts) | an outbox with persisted mutation ids replayed after a crash                                                                                                                                                                                    |
+| [`files.ts`](examples/files.ts)               | uploads, signed URLs, resumable upload, ranges, through the same URL                                                                                                                                                                            |
+| [`tokens.ts`](examples/tokens.ts)             | the same URL with a client token pinned to one customer's rows                                                                                                                                                                                  |
+| [`watch.ts`](examples/watch.ts)               | an aggregate kept fresh with `watch`                                                                                                                                                                                                            |
+| [`units/`](examples/units)                    | units: publish a shop's units, call them with the API key and with a customer token that cannot run SQL, schedule jobs (`node --env-file=examples/.env examples/units/shop.ts`); test them without an engine (`cd examples/units && pnpm test`) |
+| [`web/`](examples/web)                        | a React orders board in the browser: `cd examples/web && pnpm install && pnpm dev`                                                                                                                                                              |
 
 The dev engine needs the engine binary: set `AZORA_BIN`, or build
 `../azora-engine` (`make build`).
