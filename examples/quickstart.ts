@@ -28,7 +28,12 @@ const spent = await db.queryValue<number>(sql`SELECT coalesce(sum(total), 0) FRO
 console.log(`customer ${customer} has spent ${spent}`)
 
 // A write applies exactly once, even if the connection drops while it is in flight.
-const { lastInsertId } = await db.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [customer, 'open', 75.25, 'Footrest'])
+const { lastInsertId } = await db.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [
+  customer,
+  'open',
+  75.25,
+  'Footrest',
+])
 console.log(`created order ${lastInsertId}`)
 
 // batch runs statements in one transaction: all of them apply, or none.
