@@ -86,7 +86,13 @@ export interface WireChange {
   newFloats?: number[]
 }
 
-export interface Hello { type: typeof MsgType.Hello; version: number; database: string; credential: string; client: string }
+export interface Hello {
+  type: typeof MsgType.Hello
+  version: number
+  database: string
+  credential: string
+  client: string
+}
 export interface Welcome {
   type: typeof MsgType.Welcome
   sessionId: string
@@ -103,10 +109,27 @@ export interface Welcome {
    */
   txIdleMs?: number
 }
-export interface ErrorMsg { type: typeof MsgType.Error; reqId: number; code: string; message: string; fatal: boolean; retryAfterMs: number }
-export interface Ping { type: typeof MsgType.Ping; nonce: number }
-export interface Pong { type: typeof MsgType.Pong; nonce: number }
-export interface Auth { type: typeof MsgType.Auth; reqId: number; credential: string }
+export interface ErrorMsg {
+  type: typeof MsgType.Error
+  reqId: number
+  code: string
+  message: string
+  fatal: boolean
+  retryAfterMs: number
+}
+export interface Ping {
+  type: typeof MsgType.Ping
+  nonce: number
+}
+export interface Pong {
+  type: typeof MsgType.Pong
+  nonce: number
+}
+export interface Auth {
+  type: typeof MsgType.Auth
+  reqId: number
+  credential: string
+}
 export interface Subscribe {
   type: typeof MsgType.Subscribe
   reqId: number
@@ -123,8 +146,16 @@ export interface Subscribe {
   pathPrefix: string
   tables: string[]
 }
-export interface Subscribed { type: typeof MsgType.Subscribed; reqId: number; subId: number }
-export interface Unsubscribe { type: typeof MsgType.Unsubscribe; reqId: number; subId: number }
+export interface Subscribed {
+  type: typeof MsgType.Subscribed
+  reqId: number
+  subId: number
+}
+export interface Unsubscribe {
+  type: typeof MsgType.Unsubscribe
+  reqId: number
+  subId: number
+}
 export interface Batch {
   type: typeof MsgType.Batch
   subId: number
@@ -135,11 +166,37 @@ export interface Batch {
   tables: string[]
   changes: WireChange[]
 }
-export interface SubEnd { type: typeof MsgType.SubEnd; subId: number; code: string; message: string }
-export interface Ack { type: typeof MsgType.Ack; subId: number; checkpoint: number }
-export interface Query { type: typeof MsgType.Query; reqId: number; sql: string; args: Value[] | null; maxRows: number }
-export interface Exec { type: typeof MsgType.Exec; reqId: number; mutationId: string; sql: string; args: Value[] | null }
-export interface Tx { type: typeof MsgType.Tx; reqId: number; mutationId: string; statements: WireStatement[] }
+export interface SubEnd {
+  type: typeof MsgType.SubEnd
+  subId: number
+  code: string
+  message: string
+}
+export interface Ack {
+  type: typeof MsgType.Ack
+  subId: number
+  checkpoint: number
+}
+export interface Query {
+  type: typeof MsgType.Query
+  reqId: number
+  sql: string
+  args: Value[] | null
+  maxRows: number
+}
+export interface Exec {
+  type: typeof MsgType.Exec
+  reqId: number
+  mutationId: string
+  sql: string
+  args: Value[] | null
+}
+export interface Tx {
+  type: typeof MsgType.Tx
+  reqId: number
+  mutationId: string
+  statements: WireStatement[]
+}
 export interface Result {
   type: typeof MsgType.Result
   reqId: number
@@ -150,17 +207,63 @@ export interface Result {
   lastInsertId: number | bigint
   replayed: boolean
 }
-export interface Verify { type: typeof MsgType.Verify; reqId: number; subId: number }
-export interface Verified { type: typeof MsgType.Verified; reqId: number; subId: number; epoch: bigint; checkpoint: number; rows: number; sum: bigint }
-export interface Sign { type: typeof MsgType.Sign; reqId: number; objectId: string; ttlSeconds: number }
+export interface Verify {
+  type: typeof MsgType.Verify
+  reqId: number
+  subId: number
+}
+export interface Verified {
+  type: typeof MsgType.Verified
+  reqId: number
+  subId: number
+  epoch: bigint
+  checkpoint: number
+  rows: number
+  sum: bigint
+}
+export interface Sign {
+  type: typeof MsgType.Sign
+  reqId: number
+  objectId: string
+  ttlSeconds: number
+}
 /** Asks for a signed upload URL (answered with Signed); grant is the grant as JSON, "" for none. */
-export interface SignUpload { type: typeof MsgType.SignUpload; reqId: number; grant: string; ttlSeconds: number }
-export interface Signed { type: typeof MsgType.Signed; reqId: number; url: string; expiresAtMs: number }
-export interface GoAway { type: typeof MsgType.GoAway; reason: string; retryAfterMs: number }
-export interface Shape { type: typeof MsgType.Shape; table: string; tv: number; columns: string[]; pk: string[] }
-export interface OK { type: typeof MsgType.OK; reqId: number }
+export interface SignUpload {
+  type: typeof MsgType.SignUpload
+  reqId: number
+  grant: string
+  ttlSeconds: number
+}
+export interface Signed {
+  type: typeof MsgType.Signed
+  reqId: number
+  url: string
+  expiresAtMs: number
+}
+export interface GoAway {
+  type: typeof MsgType.GoAway
+  reason: string
+  retryAfterMs: number
+}
+export interface Shape {
+  type: typeof MsgType.Shape
+  table: string
+  tv: number
+  columns: string[]
+  pk: string[]
+}
+export interface OK {
+  type: typeof MsgType.OK
+  reqId: number
+}
 /** Runs a published unit; args is JSON text ("" for none). */
-export interface Call { type: typeof MsgType.Call; reqId: number; unit: string; args: string; mutationId: string }
+export interface Call {
+  type: typeof MsgType.Call
+  reqId: number
+  unit: string
+  args: string
+  mutationId: string
+}
 /** Answers Call: the unit's result (ok) or the error it threw; value and errData are JSON text. */
 export interface Returned {
   type: typeof MsgType.Returned
@@ -173,23 +276,82 @@ export interface Returned {
   errData: string
 }
 /** Manages a database's units (scope ddl); body is the op's JSON request. */
-export interface UnitAdmin { type: typeof MsgType.UnitAdmin; reqId: number; op: string; body: string }
+export interface UnitAdmin {
+  type: typeof MsgType.UnitAdmin
+  reqId: number
+  op: string
+  body: string
+}
 /** Answers UnitAdmin with the JSON text of its result. */
-export interface UnitAdminResult { type: typeof MsgType.UnitAdminResult; reqId: number; body: string }
+export interface UnitAdminResult {
+  type: typeof MsgType.UnitAdminResult
+  reqId: number
+  body: string
+}
 
 /** Opens an interactive transaction (answered with TxBegun). */
-export interface TxBegin { type: typeof MsgType.TxBegin; reqId: number }
+export interface TxBegin {
+  type: typeof MsgType.TxBegin
+  reqId: number
+}
 /** Answers TxBegin: txId names the transaction; the server rolls it back after idleMs without a request. */
-export interface TxBegun { type: typeof MsgType.TxBegun; reqId: number; txId: number; idleMs: number }
+export interface TxBegun {
+  type: typeof MsgType.TxBegun
+  reqId: number
+  txId: number
+  idleMs: number
+}
 /** One statement of an interactive transaction: a read (query) or a write (answered with Result). */
-export interface TxStmt { type: typeof MsgType.TxStmt; reqId: number; txId: number; sql: string; args: Value[] | null; query: boolean }
+export interface TxStmt {
+  type: typeof MsgType.TxStmt
+  reqId: number
+  txId: number
+  sql: string
+  args: Value[] | null
+  query: boolean
+}
 /** Commits (answered with Result) or rolls back (answered with OK) an interactive transaction. */
-export interface TxEnd { type: typeof MsgType.TxEnd; reqId: number; txId: number; commit: boolean; mutation: string }
+export interface TxEnd {
+  type: typeof MsgType.TxEnd
+  reqId: number
+  txId: number
+  commit: boolean
+  mutation: string
+}
 
 export type Msg =
-  | Hello | Welcome | ErrorMsg | Ping | Pong | Auth | Subscribe | Subscribed | Unsubscribe | Batch | SubEnd | Ack
-  | Query | Exec | Tx | Result | Verify | Verified | Sign | Signed | GoAway | Shape | OK
-  | Call | Returned | UnitAdmin | UnitAdminResult | SignUpload | TxBegin | TxBegun | TxStmt | TxEnd
+  | Hello
+  | Welcome
+  | ErrorMsg
+  | Ping
+  | Pong
+  | Auth
+  | Subscribe
+  | Subscribed
+  | Unsubscribe
+  | Batch
+  | SubEnd
+  | Ack
+  | Query
+  | Exec
+  | Tx
+  | Result
+  | Verify
+  | Verified
+  | Sign
+  | Signed
+  | GoAway
+  | Shape
+  | OK
+  | Call
+  | Returned
+  | UnitAdmin
+  | UnitAdminResult
+  | SignUpload
+  | TxBegin
+  | TxBegun
+  | TxStmt
+  | TxEnd
 
 function writeFilter(w: Writer, f: WireFilter | null): void {
   if (!f) return w.flag(false)
@@ -221,106 +383,195 @@ export function encode(m: Msg, w = new Writer(128)): Uint8Array {
   w.byte(m.type)
   switch (m.type) {
     case MsgType.Hello:
-      w.u(m.version); w.s(m.database); w.s(m.credential); w.s(m.client)
+      w.u(m.version)
+      w.s(m.database)
+      w.s(m.credential)
+      w.s(m.client)
       break
     case MsgType.Welcome:
-      w.s(m.sessionId); w.i(m.serverTimeMs); w.u(m.heartbeatMs); w.u(m.maxMessage); w.s(m.principal); w.strs(m.scopes)
+      w.s(m.sessionId)
+      w.i(m.serverTimeMs)
+      w.u(m.heartbeatMs)
+      w.u(m.maxMessage)
+      w.s(m.principal)
+      w.strs(m.scopes)
       w.u(m.maxSubscriptions)
       if (m.txIdleMs) w.u(m.txIdleMs)
       break
     case MsgType.Error:
-      w.u(m.reqId); w.s(m.code); w.s(m.message); w.flag(m.fatal); w.u(m.retryAfterMs)
+      w.u(m.reqId)
+      w.s(m.code)
+      w.s(m.message)
+      w.flag(m.fatal)
+      w.u(m.retryAfterMs)
       break
     case MsgType.Ping:
     case MsgType.Pong:
       w.u(m.nonce)
       break
     case MsgType.Auth:
-      w.u(m.reqId); w.s(m.credential)
+      w.u(m.reqId)
+      w.s(m.credential)
       break
     case MsgType.Subscribe:
-      w.u(m.reqId); w.u(m.subId); w.u(m.kind); w.s(m.table); w.vals(m.key); writeFilter(w, m.where); w.u(m.ops)
-      w.u(m.since); w.i(m.epoch); w.flag(m.noSnapshot); w.s(m.bucket); w.s(m.pathPrefix); w.strs(m.tables)
+      w.u(m.reqId)
+      w.u(m.subId)
+      w.u(m.kind)
+      w.s(m.table)
+      w.vals(m.key)
+      writeFilter(w, m.where)
+      w.u(m.ops)
+      w.u(m.since)
+      w.i(m.epoch)
+      w.flag(m.noSnapshot)
+      w.s(m.bucket)
+      w.s(m.pathPrefix)
+      w.strs(m.tables)
       break
     case MsgType.Subscribed:
     case MsgType.Unsubscribe:
     case MsgType.Verify:
-      w.u(m.reqId); w.u(m.subId)
+      w.u(m.reqId)
+      w.u(m.subId)
       break
     case MsgType.Batch:
-      w.u(m.subId); w.flag(m.snapshot); w.flag(m.reset); w.u(m.checkpoint); w.i(m.epoch); w.strs(m.tables)
+      w.u(m.subId)
+      w.flag(m.snapshot)
+      w.flag(m.reset)
+      w.u(m.checkpoint)
+      w.i(m.epoch)
+      w.strs(m.tables)
       w.u(m.changes.length)
       for (const c of m.changes) {
-        w.u(c.seq); w.s(c.table); w.i(c.tv); w.u(c.op); w.vals(c.key, c.keyFloats); w.vals(c.new, c.newFloats); w.vals(c.old)
+        w.u(c.seq)
+        w.s(c.table)
+        w.i(c.tv)
+        w.u(c.op)
+        w.vals(c.key, c.keyFloats)
+        w.vals(c.new, c.newFloats)
+        w.vals(c.old)
       }
       break
     case MsgType.SubEnd:
-      w.u(m.subId); w.s(m.code); w.s(m.message)
+      w.u(m.subId)
+      w.s(m.code)
+      w.s(m.message)
       break
     case MsgType.Ack:
-      w.u(m.subId); w.u(m.checkpoint)
+      w.u(m.subId)
+      w.u(m.checkpoint)
       break
     case MsgType.Query:
-      w.u(m.reqId); w.s(m.sql); w.vals(m.args); w.u(m.maxRows)
+      w.u(m.reqId)
+      w.s(m.sql)
+      w.vals(m.args)
+      w.u(m.maxRows)
       break
     case MsgType.Exec:
-      w.u(m.reqId); w.s(m.mutationId); w.s(m.sql); w.vals(m.args)
+      w.u(m.reqId)
+      w.s(m.mutationId)
+      w.s(m.sql)
+      w.vals(m.args)
       break
     case MsgType.Tx:
-      w.u(m.reqId); w.s(m.mutationId); w.u(m.statements.length)
+      w.u(m.reqId)
+      w.s(m.mutationId)
+      w.u(m.statements.length)
       for (const s of m.statements) {
-        w.s(s.sql); w.vals(s.args)
+        w.s(s.sql)
+        w.vals(s.args)
       }
       break
     case MsgType.Result:
-      w.u(m.reqId); w.strs(m.columns); w.u(m.rows.length)
+      w.u(m.reqId)
+      w.strs(m.columns)
+      w.u(m.rows.length)
       for (const row of m.rows) w.vals(row)
-      w.flag(m.truncated); w.i(m.rowsAffected); w.i(m.lastInsertId); w.flag(m.replayed)
+      w.flag(m.truncated)
+      w.i(m.rowsAffected)
+      w.i(m.lastInsertId)
+      w.flag(m.replayed)
       break
     case MsgType.Verified:
-      w.u(m.reqId); w.u(m.subId); w.i(m.epoch); w.u(m.checkpoint); w.i(m.rows); w.u(m.sum)
+      w.u(m.reqId)
+      w.u(m.subId)
+      w.i(m.epoch)
+      w.u(m.checkpoint)
+      w.i(m.rows)
+      w.u(m.sum)
       break
     case MsgType.Sign:
-      w.u(m.reqId); w.s(m.objectId); w.u(m.ttlSeconds)
+      w.u(m.reqId)
+      w.s(m.objectId)
+      w.u(m.ttlSeconds)
       break
     case MsgType.SignUpload:
-      w.u(m.reqId); w.s(m.grant); w.u(m.ttlSeconds)
+      w.u(m.reqId)
+      w.s(m.grant)
+      w.u(m.ttlSeconds)
       break
     case MsgType.Signed:
-      w.u(m.reqId); w.s(m.url); w.i(m.expiresAtMs)
+      w.u(m.reqId)
+      w.s(m.url)
+      w.i(m.expiresAtMs)
       break
     case MsgType.GoAway:
-      w.s(m.reason); w.u(m.retryAfterMs)
+      w.s(m.reason)
+      w.u(m.retryAfterMs)
       break
     case MsgType.Shape:
-      w.s(m.table); w.i(m.tv); w.strs(m.columns); w.strs(m.pk)
+      w.s(m.table)
+      w.i(m.tv)
+      w.strs(m.columns)
+      w.strs(m.pk)
       break
     case MsgType.OK:
       w.u(m.reqId)
       break
     case MsgType.Call:
-      w.u(m.reqId); w.s(m.unit); w.s(m.args); w.s(m.mutationId)
+      w.u(m.reqId)
+      w.s(m.unit)
+      w.s(m.args)
+      w.s(m.mutationId)
       break
     case MsgType.Returned:
-      w.u(m.reqId); w.flag(m.ok); w.s(m.value); w.flag(m.replayed); w.s(m.errCode); w.s(m.errMessage); w.s(m.errData)
+      w.u(m.reqId)
+      w.flag(m.ok)
+      w.s(m.value)
+      w.flag(m.replayed)
+      w.s(m.errCode)
+      w.s(m.errMessage)
+      w.s(m.errData)
       break
     case MsgType.UnitAdmin:
-      w.u(m.reqId); w.s(m.op); w.s(m.body)
+      w.u(m.reqId)
+      w.s(m.op)
+      w.s(m.body)
       break
     case MsgType.UnitAdminResult:
-      w.u(m.reqId); w.s(m.body)
+      w.u(m.reqId)
+      w.s(m.body)
       break
     case MsgType.TxBegin:
       w.u(m.reqId)
       break
     case MsgType.TxBegun:
-      w.u(m.reqId); w.u(m.txId); w.u(m.idleMs)
+      w.u(m.reqId)
+      w.u(m.txId)
+      w.u(m.idleMs)
       break
     case MsgType.TxStmt:
-      w.u(m.reqId); w.u(m.txId); w.s(m.sql); w.vals(m.args); w.flag(m.query)
+      w.u(m.reqId)
+      w.u(m.txId)
+      w.s(m.sql)
+      w.vals(m.args)
+      w.flag(m.query)
       break
     case MsgType.TxEnd:
-      w.u(m.reqId); w.u(m.txId); w.flag(m.commit); w.s(m.mutation)
+      w.u(m.reqId)
+      w.u(m.txId)
+      w.flag(m.commit)
+      w.s(m.mutation)
       break
   }
   return w.finish()
@@ -348,8 +599,15 @@ function readBody(type: number, r: Reader): Msg {
     }
     case MsgType.Welcome:
       return {
-        type, sessionId: r.s(), serverTimeMs: r.iNum(), heartbeatMs: r.u32(), maxMessage: r.u32(), principal: r.s(),
-        scopes: r.strs(), maxSubscriptions: r.u32(), txIdleMs: r.remaining > 0 ? txIdle(r) : 0,
+        type,
+        sessionId: r.s(),
+        serverTimeMs: r.iNum(),
+        heartbeatMs: r.u32(),
+        maxMessage: r.u32(),
+        principal: r.s(),
+        scopes: r.strs(),
+        maxSubscriptions: r.u32(),
+        txIdleMs: r.remaining > 0 ? txIdle(r) : 0,
       }
     case MsgType.Error:
       return { type, reqId: r.u32(), code: r.s(), message: r.s(), fatal: r.flag(), retryAfterMs: r.u32() }
@@ -367,8 +625,20 @@ function readBody(type: number, r: Reader): Msg {
       const where = readFilter(r, 0, { n: 0 })
       const ops = byteField(r, 'ops')
       return {
-        type, reqId, subId, kind, table, key, where, ops, since: r.u(), epoch: r.iBig(), noSnapshot: r.flag(),
-        bucket: r.s(), pathPrefix: r.s(), tables: r.strs(),
+        type,
+        reqId,
+        subId,
+        kind,
+        table,
+        key,
+        where,
+        ops,
+        since: r.u(),
+        epoch: r.iBig(),
+        noSnapshot: r.flag(),
+        bucket: r.s(),
+        pathPrefix: r.s(),
+        tables: r.strs(),
       }
     }
     case MsgType.Subscribed:
@@ -377,7 +647,13 @@ function readBody(type: number, r: Reader): Msg {
       return { type, reqId: r.u32(), subId: r.u32() }
     case MsgType.Batch: {
       const m: Batch = {
-        type, subId: r.u32(), snapshot: r.flag(), reset: r.flag(), checkpoint: r.u(), epoch: r.iBig(), tables: r.strs(),
+        type,
+        subId: r.u32(),
+        snapshot: r.flag(),
+        reset: r.flag(),
+        checkpoint: r.u(),
+        epoch: r.iBig(),
+        tables: r.strs(),
         changes: [],
       }
       const n = r.count()
@@ -415,7 +691,16 @@ function readBody(type: number, r: Reader): Msg {
       const n = r.count()
       const rows = new Array<Value[]>(n)
       for (let i = 0; i < n; i++) rows[i] = r.vals() ?? []
-      return { type, reqId, columns, rows, truncated: r.flag(), rowsAffected: r.iNum(), lastInsertId: r.i(), replayed: r.flag() }
+      return {
+        type,
+        reqId,
+        columns,
+        rows,
+        truncated: r.flag(),
+        rowsAffected: r.iNum(),
+        lastInsertId: r.i(),
+        replayed: r.flag(),
+      }
     }
     case MsgType.Verified:
       return { type, reqId: r.u32(), subId: r.u32(), epoch: r.iBig(), checkpoint: r.u(), rows: r.iNum(), sum: r.uBig() }
@@ -435,7 +720,14 @@ function readBody(type: number, r: Reader): Msg {
       return { type, reqId: r.u32(), unit: r.s(), args: r.s(), mutationId: r.s() }
     case MsgType.Returned:
       return {
-        type, reqId: r.u32(), ok: r.flag(), value: r.s(), replayed: r.flag(), errCode: r.s(), errMessage: r.s(), errData: r.s(),
+        type,
+        reqId: r.u32(),
+        ok: r.flag(),
+        value: r.s(),
+        replayed: r.flag(),
+        errCode: r.s(),
+        errMessage: r.s(),
+        errData: r.s(),
       }
     case MsgType.UnitAdmin:
       return { type, reqId: r.u32(), op: r.s(), body: r.s() }
