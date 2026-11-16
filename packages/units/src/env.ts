@@ -38,7 +38,10 @@ export function loadEnv(file?: string, env: Record<string, string | undefined> =
   const url = get('AZORA_URL')
   const token = get('AZORA_TOKEN') || get('AZORA_API_KEY')
   const where = used ? `the environment or ${used}` : 'the environment or a .env file'
-  if (!url) throw new EnvError(`AZORA_URL is not set (in ${where}): the database's address, as \`azora connect <database> --key <name>\` prints it`)
+  if (!url)
+    throw new EnvError(
+      `AZORA_URL is not set (in ${where}): the database's address, as \`azora connect <database> --key <name>\` prints it`,
+    )
   if (!token) throw new EnvError(`AZORA_TOKEN is not set (in ${where}): an API key with the ddl scope`)
   return { url, token, file: used }
 }
