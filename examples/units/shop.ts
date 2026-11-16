@@ -16,7 +16,9 @@ type Shop = typeof import('./units/index.ts')
 
 // The backend: AZORA_TOKEN is an API key with the ddl scope, which publishing needs.
 const backend = await connectEnv<Shop>()
-const published = await publishUnits(backend, new URL('./units', import.meta.url).pathname, { note: 'examples/units/shop.ts' })
+const published = await publishUnits(backend, new URL('./units', import.meta.url).pathname, {
+  note: 'examples/units/shop.ts',
+})
 console.log(
   published.unchanged
     ? `units unchanged: version ${published.version} is active`
@@ -66,24 +68,34 @@ try {
 // Jobs: remindCart schedules cartReminder (ctx.scheduler). One now, which
 // the engine runs within a second; one in an hour, which waits (and is
 // cancelled here, as `npx azora-units jobs cancel <id>` would).
-await backend.batch([['INSERT INTO carts(id, customer, total, note) VALUES (?, 42, 30, ?)', [`r42-${run}`, 'Desk lamp']]])
+await backend.batch([
+  ['INSERT INTO carts(id, customer, total, note) VALUES (?, 42, 30, ?)', [`r42-${run}`, 'Desk lamp']],
+])
 const now = await app.units.remindCart({ cartId: `r42-${run}`, minutes: 0 })
 const later = await app.units.remindCart({ cartId: `r42-${run}`, minutes: 60 })
 console.log(`\nscheduled reminders: ${now.jobId} (now) and ${later.jobId} (in an hour)`)
 const { jobs, pending } = await backend.unitsAdmin.jobs.list()
-for (const j of jobs) console.log(`  ${j.id} ${j.unit} ${j.state}, due ${new Date(j.runAt).toISOString()} (from ${j.source}, by ${j.createdBy})`)
+for (const j of jobs)
+  console.log(
+    `  ${j.id} ${j.unit} ${j.state}, due ${new Date(j.runAt).toISOString()} (from ${j.source}, by ${j.createdBy})`,
+  )
 console.log(`  ${pending} waiting; cancelling the later one: ${await backend.unitsAdmin.jobs.cancel(later.jobId)}`)
 
 // The checkout's audit line, the onChange unit's and the reminder job's arrive in the audit table.
 await new Promise((r) => setTimeout(r, 1500))
-const lines = await backend.query<{ what: string; detail: string }>('SELECT what, detail FROM audit ORDER BY id DESC LIMIT 5')
+const lines = await backend.query<{ what: string; detail: string }>(
+  'SELECT what, detail FROM audit ORDER BY id DESC LIMIT 5',
+)
 console.log('\naudit:')
 for (const l of lines.reverse()) console.log(`  ${l.what}: ${l.detail}`)
 
 // The run log (also: npx azora-units logs).
 const runs = await backend.unitsAdmin.runs({ limit: 6 })
 console.log('\nrecent runs:')
-for (const r of runs.reverse()) console.log(`  ${r.status.padEnd(8)} ${r.unit} (${r.trigger}, ${r.principal}, ${r.durationMs} ms)${r.error ? `: ${r.error}` : ''}`)
+for (const r of runs.reverse())
+  console.log(
+    `  ${r.status.padEnd(8)} ${r.unit} (${r.trigger}, ${r.principal}, ${r.durationMs} ms)${r.error ? `: ${r.error}` : ''}`,
+  )
 
 await app.close()
 await backend.close()
