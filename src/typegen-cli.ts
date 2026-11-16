@@ -12,7 +12,8 @@ import { connect } from './database.ts'
 import { AzoraError, ConnectionError, ErrorCode, TimeoutError } from './errors.ts'
 import { generateTypes, readSchema, TypegenError, type Schema } from './typegen.ts'
 
-const VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
+const VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string })
+  .version
 
 const USAGE = `azora-gen: TypeScript row types from the schema of an Azora database
 
@@ -66,7 +67,10 @@ const defaultIO: IO = {
 }
 
 /** --url and --token, then the environment, then the env file (`.env` when present). */
-export function settings(f: Flags, env: Record<string, string | undefined> = process.env): { url: string; token: string } {
+export function settings(
+  f: Flags,
+  env: Record<string, string | undefined> = process.env,
+): { url: string; token: string } {
   const path = resolve(f['env-file'] ?? '.env')
   let fromFile: Record<string, string | undefined> = {}
   let used: string | null = null
@@ -84,8 +88,12 @@ export function settings(f: Flags, env: Record<string, string | undefined> = pro
   const url = f.url || get('AZORA_URL')
   const token = f.token || get('AZORA_TOKEN') || get('AZORA_API_KEY')
   const where = used ? `the environment or ${used}` : 'the environment or a .env file'
-  if (!url) throw new EnvError(`no database address: pass --url or set AZORA_URL (in ${where}), as \`azora connect <database> --key <name>\` prints it`)
-  if (!token) throw new EnvError(`no credential: pass --token or set AZORA_TOKEN (in ${where}), an API key with the read scope`)
+  if (!url)
+    throw new EnvError(
+      `no database address: pass --url or set AZORA_URL (in ${where}), as \`azora connect <database> --key <name>\` prints it`,
+    )
+  if (!token)
+    throw new EnvError(`no credential: pass --token or set AZORA_TOKEN (in ${where}), an API key with the read scope`)
   return { url, token }
 }
 
@@ -106,7 +114,8 @@ export function describe(e: unknown): string {
     if (e.code === ErrorCode.PermissionDenied) {
       return `${e.message}\nReading the schema needs a credential with the read scope that may query the whole database: an API key (\`azora meta key create <db> --name <name> --scope read\`), not a client token limited to some tables.`
     }
-    if (e.code === ErrorCode.Unauthenticated) return `${e.message}\nThe server refused the credential: is AZORA_TOKEN a valid API key for this database?`
+    if (e.code === ErrorCode.Unauthenticated)
+      return `${e.message}\nThe server refused the credential: is AZORA_TOKEN a valid API key for this database?`
     return `${e.message} (${e.code})`
   }
   if (e instanceof ConnectionError || e instanceof TimeoutError) return `cannot reach the database: ${e.message}`
@@ -155,7 +164,12 @@ export async function main(argv: string[], io: IO = defaultIO, source: SchemaSou
 
     const schema = await source(f, tables)
     if (schema.tables.length === 0) throw new TypegenError('the database has no tables or views: nothing to generate')
-    const command = ['azora-gen', ...(f.out ? ['--out', f.out] : []), ...(tables ? ['--tables', tables.join(',')] : []), ...(f.bigint ? ['--bigint'] : [])].join(' ')
+    const command = [
+      'azora-gen',
+      ...(f.out ? ['--out', f.out] : []),
+      ...(tables ? ['--tables', tables.join(',')] : []),
+      ...(f.bigint ? ['--bigint'] : []),
+    ].join(' ')
     const text = generateTypes(schema, { bigint: f.bigint, command })
 
     if (!f.out) {
@@ -169,7 +183,9 @@ export async function main(argv: string[], io: IO = defaultIO, source: SchemaSou
         io.err(`azora-gen: ${f.out} is up to date`)
         return 0
       }
-      io.err(`azora-gen: ${f.out} ${current === null ? 'does not exist' : 'is out of date with the database schema'}\nRegenerate it with: ${command}`)
+      io.err(
+        `azora-gen: ${f.out} ${current === null ? 'does not exist' : 'is out of date with the database schema'}\nRegenerate it with: ${command}`,
+      )
       return 1
     }
     if (current !== text) {
