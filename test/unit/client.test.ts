@@ -1,21 +1,55 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import {
-  AzoraError, ClosedError, connect, ResyncError, TimeoutError, UnknownOutcomeError, type ConnectOptions, type Database, type Update,
+  AzoraError,
+  ClosedError,
+  connect,
+  ResyncError,
+  TimeoutError,
+  UnknownOutcomeError,
+  type ConnectOptions,
+  type Database,
+  type Update,
 } from '../../src/index.ts'
 import { MsgType, Op, type Msg } from '../../src/messages.ts'
 import { FakeServer, type FakeConn } from '../helpers/fake-server.ts'
 import { until } from '../helpers/wait.ts'
 
 type Req<T extends number> = Extract<Msg, { type: T }>
-const result = (reqId: number, rows: Array<Array<number | string | null>> = [], extra: Partial<Req<typeof MsgType.Result>> = {}): Msg => ({
-  type: MsgType.Result, reqId, columns: ['v'], rows, truncated: false, rowsAffected: 0, lastInsertId: 0, replayed: false, ...extra,
+const result = (
+  reqId: number,
+  rows: Array<Array<number | string | null>> = [],
+  extra: Partial<Req<typeof MsgType.Result>> = {},
+): Msg => ({
+  type: MsgType.Result,
+  reqId,
+  columns: ['v'],
+  rows,
+  truncated: false,
+  rowsAffected: 0,
+  lastInsertId: 0,
+  replayed: false,
+  ...extra,
 })
-const error = (reqId: number, code: string, retryAfterMs = 0, fatal = false): Msg => ({ type: MsgType.Error, reqId, code, message: code, fatal, retryAfterMs })
+const error = (reqId: number, code: string, retryAfterMs = 0, fatal = false): Msg => ({
+  type: MsgType.Error,
+  reqId,
+  code,
+  message: code,
+  fatal,
+  retryAfterMs,
+})
 
 let open: Database[] = []
 async function client(server: FakeServer, o: Partial<ConnectOptions> = {}): Promise<Database> {
   const db = await connect({
-    database: 'shop', allowPlaintext: true, apiKey: 'k', transport: server.transport, reconnectMinMs: 1, reconnectMaxMs: 5, onError: () => {}, ...o,
+    database: 'shop',
+    allowPlaintext: true,
+    apiKey: 'k',
+    transport: server.transport,
+    reconnectMinMs: 1,
+    reconnectMaxMs: 5,
+    onError: () => {},
+    ...o,
   })
   open.push(db)
   return db
@@ -36,7 +70,13 @@ describe('requests', () => {
     const s = new FakeServer()
     s.onMessage = echo
     const db = await client(s, { clientName: 'my-app/2' })
-    expect(s.last.received[0]).toMatchObject({ type: MsgType.Hello, version: 1, database: 'shop', credential: 'k', client: 'my-app/2 +tx' })
+    expect(s.last.received[0]).toMatchObject({
+      type: MsgType.Hello,
+      version: 1,
+      database: 'shop',
+      credential: 'k',
+      client: 'my-app/2 +tx',
+    })
     expect(await db.queryValue('SELECT 1')).toBe('SELECT 1')
     expect(db.session).toMatchObject({ mode: 'plaintext', principal: 'test', serverKey: '' })
   })
@@ -200,18 +240,42 @@ describe('requests', () => {
     const s = new FakeServer()
     await expect(connect({ transport: s.transport, allowPlaintext: true, apiKey: 'k' })).rejects.toThrow(/database/)
     await expect(connect({ transport: s.transport, database: 'd', allowPlaintext: true })).rejects.toThrow(/credential/)
-    await expect(connect({ transport: s.transport, database: 'd', allowPlaintext: true, apiKey: 'k', token: 't' })).rejects.toThrow(/one of/)
+    await expect(
+      connect({ transport: s.transport, database: 'd', allowPlaintext: true, apiKey: 'k', token: 't' }),
+    ).rejects.toThrow(/one of/)
     await expect(connect({ transport: s.transport, database: 'd', apiKey: 'k' })).rejects.toThrow(/serverKey/)
-    await expect(connect({ transport: s.transport, database: 'd', apiKey: 'k', allowPlaintext: true, pool: 0 })).rejects.toThrow(/pool/)
+    await expect(
+      connect({ transport: s.transport, database: 'd', apiKey: 'k', allowPlaintext: true, pool: 0 }),
+    ).rejects.toThrow(/pool/)
     expect(s.accepted).toBe(0)
   })
 })
 
 describe('subscriptions', () => {
-  const change = (seq: number, id: number, v: string, op: number = Op.Insert) => ({ seq, table: 't', tv: 1, op, key: [id], new: op === Op.Delete ? null : [id, v], old: null })
+  const change = (seq: number, id: number, v: string, op: number = Op.Insert) => ({
+    seq,
+    table: 't',
+    tv: 1,
+    op,
+    key: [id],
+    new: op === Op.Delete ? null : [id, v],
+    old: null,
+  })
   const shape: Msg = { type: MsgType.Shape, table: 't', tv: 1, columns: ['id', 'v'], pk: ['id'] }
-  const batch = (subId: number, checkpoint: number, changes: ReturnType<typeof change>[], o: { reset?: boolean; snapshot?: boolean } = {}): Msg => ({
-    type: MsgType.Batch, subId, snapshot: o.snapshot ?? false, reset: o.reset ?? false, checkpoint, epoch: 9n, tables: [], changes,
+  const batch = (
+    subId: number,
+    checkpoint: number,
+    changes: ReturnType<typeof change>[],
+    o: { reset?: boolean; snapshot?: boolean } = {},
+  ): Msg => ({
+    type: MsgType.Batch,
+    subId,
+    snapshot: o.snapshot ?? false,
+    reset: o.reset ?? false,
+    checkpoint,
+    epoch: 9n,
+    tables: [],
+    changes,
   })
   /** Confirms subscriptions and records them. */
   function subscribing(s: FakeServer): Req<typeof MsgType.Subscribe>[] {
@@ -298,10 +362,13 @@ describe('subscriptions', () => {
     const auto = await db.subscribe({ table: 't', since: 5, epoch: 9n })
     const manual = await db.subscribe({ table: 't', since: 5, epoch: 9n, manualResync: true })
     expect(subs[0]).toMatchObject({ since: 5, epoch: 9n })
-    for (const m of subs.slice(0, 2)) s.last.send({ type: MsgType.SubEnd, subId: m.subId, code: 'gone', message: 'schema changed' })
+    for (const m of subs.slice(0, 2))
+      s.last.send({ type: MsgType.SubEnd, subId: m.subId, code: 'gone', message: 'schema changed' })
     await until(() => subs.length === 3, 'the new subscribe')
     expect(subs[2]).toMatchObject({ since: 0, noSnapshot: false })
-    s.last.send(batch((subs[2] as Req<typeof MsgType.Subscribe>).subId, 30, [change(0, 1, 'a')], { reset: true, snapshot: true }))
+    s.last.send(
+      batch((subs[2] as Req<typeof MsgType.Subscribe>).subId, 30, [change(0, 1, 'a')], { reset: true, snapshot: true }),
+    )
     expect(await auto.next()).toMatchObject({ reset: true, checkpoint: 30 })
     expect(resyncs).toEqual(['schema changed'])
     const err = await manual.next().catch((e: unknown) => e)
@@ -339,7 +406,16 @@ describe('subscriptions', () => {
     const seen: string[][] = []
     const stop = await db.watch(['a', 'b'], (t) => seen.push(t))
     expect(subs[0]).toMatchObject({ kind: 5, tables: ['a', 'b'] })
-    s.last.send({ type: MsgType.Batch, subId: (subs[0] as Req<typeof MsgType.Subscribe>).subId, snapshot: false, reset: false, checkpoint: 3, epoch: 0n, tables: ['a'], changes: [] })
+    s.last.send({
+      type: MsgType.Batch,
+      subId: (subs[0] as Req<typeof MsgType.Subscribe>).subId,
+      snapshot: false,
+      reset: false,
+      checkpoint: 3,
+      epoch: 0n,
+      tables: ['a'],
+      changes: [],
+    })
     await until(() => seen.length === 1, 'the notification')
     s.last.drop()
     await until(() => seen.length === 2, 'the star')
