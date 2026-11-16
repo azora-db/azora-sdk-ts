@@ -32,9 +32,17 @@ export const boom = mutation({
   },
 })
 
-export const refuse = query({ handler: () => { throw new UnitError('conflict', 'already paid', { order: 7, blob: Uint8Array.of(1, 2) }) } })
+export const refuse = query({
+  handler: () => {
+    throw new UnitError('conflict', 'already paid', { order: 7, blob: Uint8Array.of(1, 2) })
+  },
+})
 
-export const throwString = mutation({ handler: () => { throw 'plain' } })
+export const throwString = mutation({
+  handler: () => {
+    throw 'plain'
+  },
+})
 
 /** Runs one statement and reports what happened. */
 export const sql = mutation({
@@ -44,13 +52,26 @@ export const sql = mutation({
 
 export const readSql = query({
   args: { sql: v.string(), how: v.enum(['all', 'exec']) },
-  handler: (ctx, a) => (a.how === 'all' ? ctx.db.all(a.sql) : (ctx.db as unknown as { exec(s: string): unknown }).exec(a.sql)),
+  handler: (ctx, a) =>
+    a.how === 'all' ? ctx.db.all(a.sql) : (ctx.db as unknown as { exec(s: string): unknown }).exec(a.sql),
 })
 
 /** Stores arguments and reads them back, with SQLite's types. */
 export const values = mutation({
   handler: (ctx) => {
-    const args: unknown[] = [7, 7.5, 2n ** 60n, true, false, new Date(1_700_000_000_000), Uint8Array.of(1, 2, 3), null, undefined, { a: [1] }, 'x']
+    const args: unknown[] = [
+      7,
+      7.5,
+      2n ** 60n,
+      true,
+      false,
+      new Date(1_700_000_000_000),
+      Uint8Array.of(1, 2, 3),
+      null,
+      undefined,
+      { a: [1] },
+      'x',
+    ]
     for (const a of args) ctx.db.exec('INSERT INTO vals(v) VALUES (?)', a as never)
     const rows = ctx.db.all<{ v: unknown; t: string }>('SELECT v, typeof(v) AS t FROM vals ORDER BY id')
     return {
@@ -112,7 +133,10 @@ export const rules = mutation({
   },
 })
 
-export const deep = mutation({ args: { n: v.int() }, handler: (ctx, { n }): unknown => (n === 0 ? 'bottom' : ctx.run('deep', { n: n - 1 })) })
+export const deep = mutation({
+  args: { n: v.int() },
+  handler: (ctx, { n }): unknown => (n === 0 ? 'bottom' : ctx.run('deep', { n: n - 1 })),
+})
 
 export const queryRunsMutation = query({ handler: (ctx) => ctx.run('bump', { by: 1 }) })
 
@@ -128,14 +152,22 @@ export const later = mutation({
 
 export const cancel = mutation({ args: { id: v.string() }, handler: (ctx, { id }) => ctx.scheduler.cancel(id) })
 
-export const queryScheduler = query({ handler: (ctx) => (ctx as unknown as { scheduler: { after(ms: number, u: string): string } }).scheduler.after(0, 'bump') })
+export const queryScheduler = query({
+  handler: (ctx) =>
+    (ctx as unknown as { scheduler: { after(ms: number, u: string): string } }).scheduler.after(0, 'bump'),
+})
 
 /** A job that records what it sees. */
 export const record = mutation({
   internal: true,
   args: { tag: v.string() },
   handler: (ctx, { tag }) => {
-    ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', ctx.now(), tag, JSON.stringify({ job: ctx.unit.job, trigger: ctx.unit.trigger, auth: ctx.auth.principal, kind: ctx.auth.kind }))
+    ctx.db.exec(
+      'INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)',
+      ctx.now(),
+      tag,
+      JSON.stringify({ job: ctx.unit.job, trigger: ctx.unit.trigger, auth: ctx.auth.principal, kind: ctx.auth.kind }),
+    )
   },
 })
 
@@ -167,13 +199,21 @@ export const secrets = query({
     }
     ctx.log.info('keys', Object.keys(ctx.env), { n: 1 })
     ctx.log.error(new Error('logged'))
-    return { key: ctx.env['STRIPE_KEY'], missing: ctx.env['NOPE'], assign, now: ctx.now(), uuid: ctx.uuid(), sha: ctx.crypto.sha256('abc') }
+    return {
+      key: ctx.env['STRIPE_KEY'],
+      missing: ctx.env['NOPE'],
+      assign,
+      now: ctx.now(),
+      uuid: ctx.uuid(),
+      sha: ctx.crypto.sha256('abc'),
+    }
   },
 })
 
 export const tick = schedule({
   every: '1m',
-  handler: (ctx) => void ctx.db.exec('INSERT INTO counter(id, n) VALUES (7, 1) ON CONFLICT(id) DO UPDATE SET n = n + 1'),
+  handler: (ctx) =>
+    void ctx.db.exec('INSERT INTO counter(id, n) VALUES (7, 1) ON CONFLICT(id) DO UPDATE SET n = n + 1'),
 })
 
 export const seen = onChange<{ id: number; n: number }>({
@@ -181,7 +221,13 @@ export const seen = onChange<{ id: number; n: number }>({
   ops: ['insert', 'update'],
   batch: 2,
   handler: (ctx, { changes, gap }) => {
-    for (const c of changes) ctx.db.exec('INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)', c.seq, `seen ${c.op}`, JSON.stringify({ key: c.key, new: c.new, gap }))
+    for (const c of changes)
+      ctx.db.exec(
+        'INSERT INTO audit(at, what, detail) VALUES (?, ?, ?)',
+        c.seq,
+        `seen ${c.op}`,
+        JSON.stringify({ key: c.key, new: c.new, gap }),
+      )
   },
 })
 
