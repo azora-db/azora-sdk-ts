@@ -8,7 +8,10 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
 
   beforeAll(async () => {
     engine = await startEngine()
-    db = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.apiKey, storageUrl: engine.httpUrl })
+    db = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, {
+      apiKey: engine.apiKey,
+      storageUrl: engine.httpUrl,
+    })
   })
   afterAll(async () => {
     await db?.close()
@@ -28,14 +31,27 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
       'SELECT ? AS i, ? AS neg, ? AS big, ? AS f, ? AS s, ? AS b, ? AS n, ? AS t, ? AS empty, ? AS min',
       [42, -7, big, 2.5, 'héllo 🌍', blob, null, true, new Uint8Array(0), -(2n ** 63n)],
     )
-    expect(row).toEqual({ i: 42, neg: -7, big, f: 2.5, s: 'héllo 🌍', b: blob, n: null, t: 1, empty: new Uint8Array(0), min: -(2n ** 63n) })
+    expect(row).toEqual({
+      i: 42,
+      neg: -7,
+      big,
+      f: 2.5,
+      s: 'héllo 🌍',
+      b: blob,
+      n: null,
+      t: 1,
+      empty: new Uint8Array(0),
+      min: -(2n ** 63n),
+    })
   })
 
   // The engine used to convert by declared type, sending a time value this
   // codec does not know (the query then never answered) and booleans.
   test('a value comes back as stored, whatever type the column declares', async () => {
     await db.exec('CREATE TABLE stored_ev(id INTEGER PRIMARY KEY, ts DATETIME, d DATE, at TIMESTAMP, ok BOOLEAN)')
-    await db.exec("INSERT INTO stored_ev VALUES (1, 5, 'not a date', '2026-01-02 03:04:05', 1), (2, 1.5, NULL, 1700000000000, 0)")
+    await db.exec(
+      "INSERT INTO stored_ev VALUES (1, 5, 'not a date', '2026-01-02 03:04:05', 1), (2, 1.5, NULL, 1700000000000, 0)",
+    )
     const want = [
       { id: 1, ts: 5, d: 'not a date', at: '2026-01-02 03:04:05', ok: 1 },
       { id: 2, ts: 1.5, d: null, at: 1700000000000, ok: 0 },
@@ -53,19 +69,23 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
     const b = await db.batch([
       ['UPDATE orders SET status = ? WHERE id = ?', ['paid', id]],
       sql`INSERT INTO items(order_id, sku, qty) VALUES (${id}, ${'A-1'}, ${3})`,
-      'INSERT INTO plain(v) VALUES (\'x\')',
+      "INSERT INTO plain(v) VALUES ('x')",
     ])
     expect(b.rowsAffected).toBe(3) // the total over the statements
-    expect(await db.query('SELECT o.status, i.sku, i.qty FROM orders o JOIN items i ON i.order_id = o.id WHERE o.id = ?', [id])).toEqual([
-      { status: 'paid', sku: 'A-1', qty: 3 },
-    ])
+    expect(
+      await db.query('SELECT o.status, i.sku, i.qty FROM orders o JOIN items i ON i.order_id = o.id WHERE o.id = ?', [
+        id,
+      ]),
+    ).toEqual([{ status: 'paid', sku: 'A-1', qty: 3 }])
     expect(await db.queryOne('SELECT * FROM orders WHERE id = -1')).toBeUndefined()
     expect(await db.queryValue('SELECT id FROM orders WHERE id = -1')).toBeUndefined()
   })
 
   test('a failing batch changes nothing', async () => {
     const before = await db.queryValue<number>('SELECT count(*) FROM plain')
-    await expect(db.batch(['INSERT INTO plain(v) VALUES (\'kept?\')', 'INSERT INTO nowhere VALUES (1)'])).rejects.toMatchObject({ code: 'invalid' })
+    await expect(
+      db.batch(["INSERT INTO plain(v) VALUES ('kept?')", 'INSERT INTO nowhere VALUES (1)']),
+    ).rejects.toMatchObject({ code: 'invalid' })
     expect(await db.queryValue('SELECT count(*) FROM plain')).toBe(before)
   })
 
@@ -87,7 +107,11 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
     expect(rows.rows.length).toBe(2000)
     expect(rows.rows[1999]).toEqual([2000, text])
     expect(rows.truncated).toBe(false)
-    const cut = await db.queryRaw('WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50) SELECT i FROM n', [], { maxRows: 7 })
+    const cut = await db.queryRaw(
+      'WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50) SELECT i FROM n',
+      [],
+      { maxRows: 7 },
+    )
     expect(cut.rows.length).toBe(7)
     expect(cut.truncated).toBe(true)
     const large = 'y'.repeat(300_000)
@@ -104,7 +128,7 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
     await expect(db.query('SELECT * FROM nowhere')).rejects.toThrow(/invalid: .*no such table: nowhere/)
     await expect(db.query('SELECT FROM')).rejects.toMatchObject({ code: 'invalid' })
     await expect(db.query('SELEC 1')).rejects.toMatchObject({ code: 'permission_denied' })
-    await expect(db.query('ATTACH DATABASE \'x\' AS y')).rejects.toMatchObject({ code: 'permission_denied' })
+    await expect(db.query("ATTACH DATABASE 'x' AS y")).rejects.toMatchObject({ code: 'permission_denied' })
     await expect(db.exec('SELECT 1', [{} as never])).rejects.toThrow(/argument 1/)
     await db.exec('DROP TABLE scratch')
   })
@@ -115,7 +139,8 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
   })
 
   test('timeouts and abort signals', async () => {
-    const slow = 'WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30000000) SELECT count(*) FROM n'
+    const slow =
+      'WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30000000) SELECT count(*) FROM n'
     await expect(db.query(slow, [], { timeoutMs: 30 })).rejects.toThrow(/did not finish within 30 ms/)
     const ac = new AbortController()
     const p = db.query(slow, [], { signal: ac.signal })
@@ -143,19 +168,31 @@ describe.skipIf(!engineBinary())('queries and writes', () => {
 
   test('connection failures are reported clearly', async () => {
     const wrongKey = 'AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tk'
-    await expect(connect(`${engine.tcpUrl}?key=${wrongKey}`, { apiKey: engine.apiKey })).rejects.toBeInstanceOf(HandshakeError)
-    await expect(connect(`${engine.tcpUrl}?fp=azp1-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa`, { apiKey: engine.apiKey })).rejects.toThrow(/fingerprint/)
-    await expect(connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: 'azk_nope_nope' })).rejects.toMatchObject({ code: 'unauthenticated' })
-    await expect(connect(`azora://127.0.0.1:${engine.port}/nosuchdb?key=${engine.serverKey}`, { apiKey: engine.apiKey })).rejects.toBeInstanceOf(AzoraError)
+    await expect(connect(`${engine.tcpUrl}?key=${wrongKey}`, { apiKey: engine.apiKey })).rejects.toBeInstanceOf(
+      HandshakeError,
+    )
+    await expect(
+      connect(`${engine.tcpUrl}?fp=azp1-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa`, { apiKey: engine.apiKey }),
+    ).rejects.toThrow(/fingerprint/)
+    await expect(
+      connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: 'azk_nope_nope' }),
+    ).rejects.toMatchObject({ code: 'unauthenticated' })
+    await expect(
+      connect(`azora://127.0.0.1:${engine.port}/nosuchdb?key=${engine.serverKey}`, { apiKey: engine.apiKey }),
+    ).rejects.toBeInstanceOf(AzoraError)
     await expect(connect('azora://127.0.0.1:1/shop?plaintext=1', { apiKey: 'x', timeoutMs: 2000 })).rejects.toThrow()
     await expect(connect('ftp://x/shop', { apiKey: 'x' })).rejects.toThrow(/unsupported scheme/)
-    await expect(connect('http://db.example.com/shop', { apiKey: 'x' })).rejects.toThrow(/add \?key=<server key> to the URL/)
+    await expect(connect('http://db.example.com/shop', { apiKey: 'x' })).rejects.toThrow(
+      /add \?key=<server key> to the URL/,
+    )
     await expect(connect(engine.tcpUrl, { apiKey: 'x' })).rejects.toThrow(/serverKey/)
   })
 
   test('close rejects calls in flight and later ones', async () => {
     const c = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.apiKey })
-    const pending = c.query('WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30000000) SELECT count(*) FROM n')
+    const pending = c.query(
+      'WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30000000) SELECT count(*) FROM n',
+    )
     const closing = c.close()
     await expect(pending).rejects.toThrow(/closed/)
     await closing
