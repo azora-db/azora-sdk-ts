@@ -16,7 +16,18 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
   beforeAll(async () => {
     engine = await startEngine({
       tokens: {
-        reader: ['--sub', 'user:42', '--scope', 'read', '--ttl', '1h', '--table', 'orders', '--filter', 'orders: customer = 42'],
+        reader: [
+          '--sub',
+          'user:42',
+          '--scope',
+          'read',
+          '--ttl',
+          '1h',
+          '--table',
+          'orders',
+          '--filter',
+          'orders: customer = 42',
+        ],
       },
     })
   })
@@ -26,7 +37,10 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
 
   for (const transport of ['tcp', 'websocket'] as const) {
     test(`a server restart loses and duplicates nothing (${transport})`, async () => {
-      const url = transport === 'tcp' ? `${engine.tcpUrl}?key=${engine.serverKey}` : `${engine.wsUrl}?db=shop&key=${engine.serverKey}`
+      const url =
+        transport === 'tcp'
+          ? `${engine.tcpUrl}?key=${engine.serverKey}`
+          : `${engine.wsUrl}?db=shop&key=${engine.serverKey}`
       const events: string[] = []
       const db = await connect(url, {
         apiKey: engine.apiKey,
@@ -42,7 +56,8 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
       live.subscribe((ev) => {
         if (ev.reset) resets++
       })
-      for (let i = 0; i < 20; i++) await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [i, tag, i])
+      for (let i = 0; i < 20; i++)
+        await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [i, tag, i])
       await until(() => live.size === 20, 'the first 20 rows')
 
       await engine.stop()
@@ -57,10 +72,14 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
       const results = await Promise.all(queued)
       expect(results.every((r) => r.rowsAffected === 1)).toBe(true)
       expect(await read).toBe(1)
-      for (let i = 0; i < 5; i++) await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [200 + i, tag, 200 + i])
+      for (let i = 0; i < 5; i++)
+        await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [200 + i, tag, 200 + i])
 
       await until(() => live.size === 35, 'all 35 rows')
-      const want = await db.query<Order>('SELECT id, customer, status, total, note FROM orders WHERE status = ? ORDER BY id', [tag])
+      const want = await db.query<Order>(
+        'SELECT id, customer, status, total, note FROM orders WHERE status = ? ORDER BY id',
+        [tag],
+      )
       expect(want).toHaveLength(35)
       expect(live.rows).toEqual(want)
       expect(resets).toBe(0) // resumed from its checkpoint: no new snapshot
@@ -72,7 +91,12 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
   }
 
   test('a write retried with the same id across a restart applies once', async () => {
-    const db = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.apiKey, reconnectMinMs: 20, reconnectMaxMs: 100, onError: () => {} })
+    const db = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, {
+      apiKey: engine.apiKey,
+      reconnectMinMs: 20,
+      reconnectMaxMs: 100,
+      onError: () => {},
+    })
     const mutationId = `persisted-${Date.now()}`
     const first = await db.exec('INSERT INTO plain(v) VALUES (?)', ['exactly-once'], { mutationId })
     await engine.restart()
@@ -89,7 +113,9 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
       ['INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [42, 'mine', 1]],
       ['INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [43, 'theirs', 2]],
     ])
-    const user = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { token: engine.tokens['reader'] as string })
+    const user = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, {
+      token: engine.tokens['reader'] as string,
+    })
     expect(user.session).toMatchObject({ principal: 'user:42', scopes: ['read'] })
     const mine = await user.live<Order>('orders')
     expect(mine.rows.length).toBeGreaterThan(0)
@@ -111,7 +137,23 @@ describe.skipIf(!engineBinary())('reconnects, credentials and pools', () => {
     // Tokens are minted by the CLI, which needs the data-root lock: stop the server for it.
     await engine.stop()
     const mint = (ttl: string): string =>
-      (JSON.parse(engine.cli('realtime', 'token', 'create', 'shop', '--sub', 'user:7', '--scope', 'read,write', '--ttl', ttl, '--json')) as { token: string }).token
+      (
+        JSON.parse(
+          engine.cli(
+            'realtime',
+            'token',
+            'create',
+            'shop',
+            '--sub',
+            'user:7',
+            '--scope',
+            'read,write',
+            '--ttl',
+            ttl,
+            '--json',
+          ),
+        ) as { token: string }
+      ).token
     const short = mint('3s')
     const long = mint('1h')
     await engine.start()
