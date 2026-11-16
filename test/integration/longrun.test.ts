@@ -30,13 +30,15 @@ describe.skipIf(!engineBinary())('long-running connections', () => {
       if (m.type === MsgType.Pong) pongs++
       else if (m.type !== MsgType.Ping) answers.push(m)
     }
-    ch.send(encode({ type: MsgType.Hello, version: 1, database: 'shop', credential: engine.apiKey, client: 'rekey-test' }))
+    ch.send(
+      encode({ type: MsgType.Hello, version: 1, database: 'shop', credential: engine.apiKey, client: 'rekey-test' }),
+    )
     await until(() => answers.length === 1, 'the welcome')
     // Each ping is one frame out and one pong frame back: past 2^20 both
     // cipher states have rekeyed, and anything after decrypts only if the
     // client derived the same new keys as the server.
     const total = (1 << 20) + 5000
-    for (let sent = 0; sent < total; ) {
+    for (let sent = 0; sent < total;) {
       const n = Math.min(20_000, total - sent)
       for (let i = 0; i < n; i++) ch.send(encode({ type: MsgType.Ping, nonce: sent + i }))
       sent += n
@@ -52,9 +54,15 @@ describe.skipIf(!engineBinary())('long-running connections', () => {
   }, 180_000)
 
   test('a crashed server (no goodbye) is survived the same way', async () => {
-    const db = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.apiKey, reconnectMinMs: 20, reconnectMaxMs: 100, onError: () => {} })
+    const db = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, {
+      apiKey: engine.apiKey,
+      reconnectMinMs: 20,
+      reconnectMaxMs: 100,
+      onError: () => {},
+    })
     const live = await db.live('orders', { where: "status = 'crash'" })
-    for (let i = 0; i < 10; i++) await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [i, 'crash', i])
+    for (let i = 0; i < 10; i++)
+      await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [i, 'crash', i])
     await until(() => live.size === 10, 'the rows before the crash')
     await engine.kill()
     const queued = db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [99, 'crash', 99])
