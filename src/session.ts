@@ -225,7 +225,12 @@ export class Link {
  * the link. `at` is the endpoint when discovery supplied it (default: the
  * options').
  */
-export async function dial(o: ResolvedOptions, credential: string, signal: AbortSignal, at: Endpoint = o): Promise<Link> {
+export async function dial(
+  o: ResolvedOptions,
+  credential: string,
+  signal: AbortSignal,
+  at: Endpoint = o,
+): Promise<Link> {
   const t: Transport = o.transport
     ? await o.transport(signal)
     : at.webSocketUrl
@@ -254,7 +259,15 @@ export async function dial(o: ResolvedOptions, credential: string, signal: Abort
         }
       }
       try {
-        ch.send(encode({ type: MsgType.Hello, version: PROTOCOL_VERSION, database: o.database, credential, client: `${o.clientName} ${CLIENT_TX}` }))
+        ch.send(
+          encode({
+            type: MsgType.Hello,
+            version: PROTOCOL_VERSION,
+            database: o.database,
+            credential,
+            client: `${o.clientName} ${CLIENT_TX}`,
+          }),
+        )
       } catch (e) {
         reject(e as Error)
       }
