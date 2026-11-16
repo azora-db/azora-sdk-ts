@@ -27,5 +27,14 @@
       "@azora-db/units/testing": ["./packages/units/src/testing.ts"]
     }
   },
-  "include": ["src", "test", "bench", "scripts", "examples/*.ts", "examples/units/*.ts", "examples/units/units/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "src",
+    "test",
+    "bench",
+    "scripts",
+    "examples/*.ts",
+    "examples/units/*.ts",
+    "examples/units/units/**/*.ts",
+    "vitest.config.ts"
+  ]
 }
