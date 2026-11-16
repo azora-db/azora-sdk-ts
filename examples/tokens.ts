@@ -25,13 +25,19 @@ console.log(`connected as ${app.session?.principal}, scopes: ${app.session?.scop
 const mine = await app.live<{ id: number; customer: number; status: string; total: number }>('orders')
 console.log(`this user sees ${mine.size} orders, all theirs: ${mine.rows.every((o) => o.customer === 42)}`)
 mine.subscribe(({ changes }) => {
-  for (const c of changes) console.log(`  ${c.op} order #${c.key[0]} (customer ${c.row?.customer ?? c.previous?.customer})`)
+  for (const c of changes)
+    console.log(`  ${c.op} order #${c.key[0]} (customer ${c.row?.customer ?? c.previous?.customer})`)
 })
 
 // The backend (the same URL, with the API key in AZORA_TOKEN) writes orders
 // for two customers; only customer 42's arrives.
 const backend = await connectEnv()
-await backend.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [7, 'open', 15, 'not yours'])
+await backend.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [
+  7,
+  'open',
+  15,
+  'not yours',
+])
 await backend.exec('INSERT INTO orders(customer, status, total, note) VALUES (?, ?, ?, ?)', [42, 'open', 15, 'yours'])
 await new Promise((r) => setTimeout(r, 300))
 
