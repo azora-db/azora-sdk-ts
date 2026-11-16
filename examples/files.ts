@@ -14,8 +14,13 @@ const invoice = await db.storage.upload('Invoice 2026-0042\nStanding desk frame 
   path: `invoices/2026-0042-${Date.now()}.txt`,
   contentType: 'text/plain',
 })
-const { lastInsertId } = await db.exec('INSERT INTO documents(title, file) VALUES (?, ?)', ['Invoice 2026-0042', invoice.id])
-console.log(`stored ${invoice.name} (${invoice.size} bytes, sha256 ${invoice.sha256.slice(0, 12)}…) for document ${lastInsertId}`)
+const { lastInsertId } = await db.exec('INSERT INTO documents(title, file) VALUES (?, ?)', [
+  'Invoice 2026-0042',
+  invoice.id,
+])
+console.log(
+  `stored ${invoice.name} (${invoice.size} bytes, sha256 ${invoice.sha256.slice(0, 12)}…) for document ${lastInsertId}`,
+)
 
 // A signed URL opens that one file, without credentials, until it expires.
 const link = await db.storage.signUrl(invoice.id, { ttlSeconds: 300, download: true, filename: 'invoice.txt' })
@@ -23,7 +28,10 @@ const fetched = await fetch(link.url)
 console.log(`signed link valid until ${link.expiresAt.toISOString()}: "${(await fetched.text()).split('\n')[0]}"`)
 
 // SQL can sign too: one query returns rows with ready-to-use links.
-const docs = await db.query<{ title: string; url: string }>('SELECT title, azora_url(file, 60) AS url FROM documents WHERE id = ?', [lastInsertId])
+const docs = await db.query<{ title: string; url: string }>(
+  'SELECT title, azora_url(file, 60) AS url FROM documents WHERE id = ?',
+  [lastInsertId],
+)
 console.log(`from SQL: ${docs[0]?.title} -> ${docs[0]?.url.split('?')[0]}?…`)
 
 // Large files go up in chunks; a failed chunk is retried from the server's offset.
@@ -40,7 +48,7 @@ const tail = new Uint8Array(await (await db.storage.download(video.id, { range: 
 console.log(`last bytes match: ${tail.every((b, i) => b === big[big.length - 16 + i])}`)
 
 let n = 0
-for await (const o of db.storage.listAll({ prefix: 'media/' })) n++, void o
+for await (const o of db.storage.listAll({ prefix: 'media/' })) (n++, void o)
 console.log(`${n} object(s) under media/`)
 
 await db.storage.delete(video.id)
