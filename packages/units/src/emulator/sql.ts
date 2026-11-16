@@ -8,7 +8,18 @@ import { bytesOf, engineStringify } from './json.ts'
 /** The prefix of the engine's own tables, which units cannot use. */
 export const TABLE_PREFIX = 'azora_units'
 
-const DENIED = new Set(['attach', 'detach', 'vacuum', 'begin', 'commit', 'end', 'rollback', 'savepoint', 'release', 'pragma'])
+const DENIED = new Set([
+  'attach',
+  'detach',
+  'vacuum',
+  'begin',
+  'commit',
+  'end',
+  'rollback',
+  'savepoint',
+  'release',
+  'pragma',
+])
 
 function isWord(c: string): boolean {
   return /^[A-Za-z0-9_]$/.test(c)
