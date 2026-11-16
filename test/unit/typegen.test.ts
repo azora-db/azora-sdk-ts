@@ -2,30 +2,64 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { columnKind, generateTypes, readSchema, typeName, TypegenError, type Schema, type TableSchema } from '../../src/typegen.ts'
+import {
+  columnKind,
+  generateTypes,
+  readSchema,
+  typeName,
+  TypegenError,
+  type Schema,
+  type TableSchema,
+} from '../../src/typegen.ts'
 import { main, settings, type IO, type SchemaSource } from '../../src/typegen-cli.ts'
 
-const table = (name: string, columns: TableSchema['columns'], kind: TableSchema['kind'] = 'table'): TableSchema => ({ name, kind, columns })
+const table = (name: string, columns: TableSchema['columns'], kind: TableSchema['kind'] = 'table'): TableSchema => ({
+  name,
+  kind,
+  columns,
+})
 
 /** The body of `export interface <name> { … }` in generated text, one property per entry. */
 function body(text: string, name: string): string[] {
   const m = new RegExp(`export interface ${name} \\{\\n([\\s\\S]*?)\\n?\\}`).exec(text)
   if (!m) throw new Error(`no interface ${name} in:\n${text}`)
-  return (m[1] ?? '').split('\n').filter((l) => l !== '').map((l) => l.trim())
+  return (m[1] ?? '')
+    .split('\n')
+    .filter((l) => l !== '')
+    .map((l) => l.trim())
 }
 
 describe('columnKind', () => {
   test.each([
-    ['INTEGER', 'integer'], ['INT', 'integer'], ['bigint', 'integer'], ['UNSIGNED BIG INT', 'integer'], ['TINYINT(1)', 'integer'],
-    ['REAL', 'real'], ['DOUBLE PRECISION', 'real'], ['float', 'real'],
-    ['TEXT', 'text'], ['VARCHAR(255)', 'text'], ['NCHAR(5)', 'text'], ['CLOB', 'text'],
-    ['BLOB', 'blob'], ['blob', 'blob'],
-    ['BOOLEAN', 'integer'], [' boolean ', 'integer'], ['BOOL', 'integer'],
-    ['JSON', 'json'], ['jsonb', 'json'],
-    ['NUMERIC', 'numeric'], ['DECIMAL(10,2)', 'numeric'], ['DATETIME', 'numeric'], ['DATE', 'numeric'],
-    ['', 'any'], ['  ', 'any'],
+    ['INTEGER', 'integer'],
+    ['INT', 'integer'],
+    ['bigint', 'integer'],
+    ['UNSIGNED BIG INT', 'integer'],
+    ['TINYINT(1)', 'integer'],
+    ['REAL', 'real'],
+    ['DOUBLE PRECISION', 'real'],
+    ['float', 'real'],
+    ['TEXT', 'text'],
+    ['VARCHAR(255)', 'text'],
+    ['NCHAR(5)', 'text'],
+    ['CLOB', 'text'],
+    ['BLOB', 'blob'],
+    ['blob', 'blob'],
+    ['BOOLEAN', 'integer'],
+    [' boolean ', 'integer'],
+    ['BOOL', 'integer'],
+    ['JSON', 'json'],
+    ['jsonb', 'json'],
+    ['NUMERIC', 'numeric'],
+    ['DECIMAL(10,2)', 'numeric'],
+    ['DATETIME', 'numeric'],
+    ['DATE', 'numeric'],
+    ['', 'any'],
+    ['  ', 'any'],
     // SQLite's order: INT wins over CHAR ("CHARINT"), and a POINT is an integer.
-    ['CHARINT', 'integer'], ['POINT', 'integer'], ['FLOATING POINT', 'integer'],
+    ['CHARINT', 'integer'],
+    ['POINT', 'integer'],
+    ['FLOATING POINT', 'integer'],
   ])('%s -> %s', (declared, kind) => {
     expect(columnKind(declared)).toBe(kind)
   })
@@ -33,8 +67,15 @@ describe('columnKind', () => {
 
 describe('typeName', () => {
   test.each([
-    ['orders', 'Orders'], ['order_items', 'OrderItems'], ['OrderItems', 'OrderItems'], ['order-items v2', 'OrderItemsV2'],
-    ['__x', 'X'], ['2fa_codes', '_2faCodes'], ['été', 'T'], ['---', 'Table'], ['userID', 'UserID'],
+    ['orders', 'Orders'],
+    ['order_items', 'OrderItems'],
+    ['OrderItems', 'OrderItems'],
+    ['order-items v2', 'OrderItemsV2'],
+    ['__x', 'X'],
+    ['2fa_codes', '_2faCodes'],
+    ['été', 'T'],
+    ['---', 'Table'],
+    ['userID', 'UserID'],
   ])('%s -> %s', (name, want) => {
     expect(typeName(name)).toBe(want)
   })
@@ -44,17 +85,48 @@ describe('generateTypes', () => {
   test('every column kind, nullable and not', () => {
     const kinds = ['INTEGER', 'REAL', 'TEXT', 'BLOB', 'BOOLEAN', 'BOOL', 'JSON', 'NUMERIC', '']
     const text = generateTypes({
-      tables: [table('t', [...kinds.map((type, i) => ({ name: `a${i}`, type, notNull: true })), ...kinds.map((type, i) => ({ name: `b${i}`, type }))])],
+      tables: [
+        table('t', [
+          ...kinds.map((type, i) => ({ name: `a${i}`, type, notNull: true })),
+          ...kinds.map((type, i) => ({ name: `b${i}`, type })),
+        ]),
+      ],
     })
     expect(body(text, 'T')).toEqual([
-      'a0: number', 'a1: number', 'a2: string', 'a3: Uint8Array', 'a4: number', 'a5: number', 'a6: unknown', 'a7: number | string', 'a8: unknown',
-      'b0: number | null', 'b1: number | null', 'b2: string | null', 'b3: Uint8Array | null', 'b4: number | null', 'b5: number | null', 'b6: unknown',
-      'b7: number | string | null', 'b8: unknown',
+      'a0: number',
+      'a1: number',
+      'a2: string',
+      'a3: Uint8Array',
+      'a4: number',
+      'a5: number',
+      'a6: unknown',
+      'a7: number | string',
+      'a8: unknown',
+      'b0: number | null',
+      'b1: number | null',
+      'b2: string | null',
+      'b3: Uint8Array | null',
+      'b4: number | null',
+      'b5: number | null',
+      'b6: unknown',
+      'b7: number | string | null',
+      'b8: unknown',
     ])
   })
 
   test('bigint option types integers number | bigint', () => {
-    const text = generateTypes({ tables: [table('t', [{ name: 'id', type: 'INTEGER', pk: 1 }, { name: 'n', type: 'BIGINT' }, { name: 'r', type: 'REAL', notNull: true }])] }, { bigint: true })
+    const text = generateTypes(
+      {
+        tables: [
+          table('t', [
+            { name: 'id', type: 'INTEGER', pk: 1 },
+            { name: 'n', type: 'BIGINT' },
+            { name: 'r', type: 'REAL', notNull: true },
+          ]),
+        ],
+      },
+      { bigint: true },
+    )
     expect(body(text, 'T')).toEqual(['id: number | bigint', 'n: number | bigint | null', 'r: number'])
     expect(text).toContain('// Integer columns are number | bigint')
   })
@@ -62,15 +134,28 @@ describe('generateTypes', () => {
   test('primary keys: rowid alias, text key, composite key, WITHOUT ROWID', () => {
     const text = generateTypes({
       tables: [
-        table('orders', [{ name: 'id', type: 'INTEGER', pk: 1 }, { name: 'status', type: 'TEXT', notNull: true }]),
+        table('orders', [
+          { name: 'id', type: 'INTEGER', pk: 1 },
+          { name: 'status', type: 'TEXT', notNull: true },
+        ]),
         // A TEXT PRIMARY KEY of an ordinary table accepts NULL.
-        table('kv', [{ name: 'k', type: 'TEXT', pk: 1 }, { name: 'v', type: 'BLOB' }]),
+        table('kv', [
+          { name: 'k', type: 'TEXT', pk: 1 },
+          { name: 'v', type: 'BLOB' },
+        ]),
         // INT is not INTEGER: no rowid alias.
         table('legacy', [{ name: 'id', type: 'INT', pk: 1 }]),
         // A composite key of an ordinary table: the INTEGER part is no alias either.
-        table('pairs', [{ name: 'a', type: 'INTEGER', pk: 1 }, { name: 'b', type: 'INTEGER', pk: 2 }]),
+        table('pairs', [
+          { name: 'a', type: 'INTEGER', pk: 1 },
+          { name: 'b', type: 'INTEGER', pk: 2 },
+        ]),
         // WITHOUT ROWID: pragma_table_xinfo reports the key NOT NULL.
-        table('items', [{ name: 'order_id', type: 'INTEGER', notNull: true, pk: 1 }, { name: 'sku', type: 'TEXT', notNull: true, pk: 2 }, { name: 'qty', type: 'INTEGER', notNull: true }]),
+        table('items', [
+          { name: 'order_id', type: 'INTEGER', notNull: true, pk: 1 },
+          { name: 'sku', type: 'TEXT', notNull: true, pk: 2 },
+          { name: 'qty', type: 'INTEGER', notNull: true },
+        ]),
       ],
     })
     expect(body(text, 'Orders')).toEqual(['id: number', 'status: string'])
@@ -96,12 +181,36 @@ describe('generateTypes', () => {
         ]),
       ],
     })
-    expect(body(text, 'T')).toEqual(['id: number', 'name: string', 'status: string', 'note: string | null', 'total: number | null', 'doc: unknown'])
-    expect(body(text, 'NewT')).toEqual(['id?: number', 'name: string', 'status?: string', 'note?: string | null', 'doc: unknown'])
+    expect(body(text, 'T')).toEqual([
+      'id: number',
+      'name: string',
+      'status: string',
+      'note: string | null',
+      'total: number | null',
+      'doc: unknown',
+    ])
+    expect(body(text, 'NewT')).toEqual([
+      'id?: number',
+      'name: string',
+      'status?: string',
+      'note?: string | null',
+      'doc: unknown',
+    ])
   })
 
   test('views get a row type and no insert type', () => {
-    const text = generateTypes({ tables: [table('open_orders', [{ name: 'id', type: 'INTEGER' }, { name: 'n', type: '' }], 'view')] })
+    const text = generateTypes({
+      tables: [
+        table(
+          'open_orders',
+          [
+            { name: 'id', type: 'INTEGER' },
+            { name: 'n', type: '' },
+          ],
+          'view',
+        ),
+      ],
+    })
     expect(body(text, 'OpenOrders')).toEqual(['id: number | null', 'n: unknown'])
     expect(text).toContain('/** A row of the view `open_orders`. */')
     expect(text).not.toContain('NewOpenOrders')
@@ -111,16 +220,30 @@ describe('generateTypes', () => {
   test('names: quoting, collisions and the reserved Tables', () => {
     const text = generateTypes({
       tables: [
-        table('order_items', [{ name: 'first name', type: 'TEXT' }, { name: '2nd', type: 'TEXT' }, { name: 'a"b', type: 'TEXT' }, { name: '$ok_1', type: 'TEXT' }]),
+        table('order_items', [
+          { name: 'first name', type: 'TEXT' },
+          { name: '2nd', type: 'TEXT' },
+          { name: 'a"b', type: 'TEXT' },
+          { name: '$ok_1', type: 'TEXT' },
+        ]),
         table('OrderItems', [{ name: 'x', type: 'TEXT' }]),
         table('new_order_items', [{ name: 'x', type: 'TEXT' }]),
         table('tables', [{ name: 'x', type: 'TEXT' }]),
         table('my-table */', [{ name: 'x', type: 'TEXT' }]),
       ],
     })
-    expect(body(text, 'OrderItems')).toEqual(['"first name": string | null', '"2nd": string | null', '"a\\"b": string | null', '$ok_1: string | null'])
+    expect(body(text, 'OrderItems')).toEqual([
+      '"first name": string | null',
+      '"2nd": string | null',
+      '"a\\"b": string | null',
+      '$ok_1: string | null',
+    ])
     expect(body(text, 'Tables')).toEqual([
-      'order_items: OrderItems', 'OrderItems: OrderItems_2', 'new_order_items: NewOrderItems', 'tables: Tables_2', '"my-table */": MyTable',
+      'order_items: OrderItems',
+      'OrderItems: OrderItems_2',
+      'new_order_items: NewOrderItems',
+      'tables: Tables_2',
+      '"my-table */": MyTable',
     ])
     // The insert types give way to the table of the same name.
     expect(text).toContain('export interface NewOrderItems_2 {')
@@ -132,7 +255,13 @@ describe('generateTypes', () => {
 
   test('header, order and determinism', () => {
     const schema: Schema = {
-      tables: [table('zebra', [{ name: 'z', type: 'TEXT' }, { name: 'a', type: 'TEXT' }]), table('apple', [{ name: 'id', type: 'INTEGER', pk: 1 }])],
+      tables: [
+        table('zebra', [
+          { name: 'z', type: 'TEXT' },
+          { name: 'a', type: 'TEXT' },
+        ]),
+        table('apple', [{ name: 'id', type: 'INTEGER', pk: 1 }]),
+      ],
     }
     const text = generateTypes(schema, { command: 'azora-gen --out src/azora-types.ts' })
     expect(text).toBe(generateTypes(structuredClone(schema), { command: 'azora-gen --out src/azora-types.ts' }))
@@ -147,7 +276,17 @@ describe('generateTypes', () => {
   })
 
   test('the whole file for a small schema', () => {
-    const text = generateTypes({ tables: [table('orders', [{ name: 'id', type: 'INTEGER', pk: 1 }, { name: 'note', type: 'TEXT' }])] }, { command: 'azora-gen' })
+    const text = generateTypes(
+      {
+        tables: [
+          table('orders', [
+            { name: 'id', type: 'INTEGER', pk: 1 },
+            { name: 'note', type: 'TEXT' },
+          ]),
+        ],
+      },
+      { command: 'azora-gen' },
+    )
     expect(text).toBe(`// Generated by azora-gen from the database schema. Do not edit: changes are lost.
 // Regenerate with: azora-gen
 //
@@ -199,20 +338,41 @@ describe('readSchema', () => {
             { name: 'double', type: 'INTEGER', notNull: false, pk: 0, hasDefault: false, generated: true },
           ],
         },
-        { name: 'search', kind: 'table', columns: [{ name: 'body', type: '', notNull: false, pk: 0, hasDefault: false, generated: false }] },
-        { name: 'v', kind: 'view', columns: [{ name: 'n', type: '', notNull: false, pk: 0, hasDefault: false, generated: false }] },
+        {
+          name: 'search',
+          kind: 'table',
+          columns: [{ name: 'body', type: '', notNull: false, pk: 0, hasDefault: false, generated: false }],
+        },
+        {
+          name: 'v',
+          kind: 'view',
+          columns: [{ name: 'n', type: '', notNull: false, pk: 0, hasDefault: false, generated: false }],
+        },
       ],
     })
   })
 
   test('tables option: a subset in schema order, internal tables when named, unknown names refused', async () => {
-    expect((await readSchema(db, { tables: ['v', 'orders', 'azora_files'] })).tables.map((t) => t.name)).toEqual(['orders', 'azora_files', 'v'])
-    await expect(readSchema(db, { tables: ['orders', 'nope'] })).rejects.toThrow(new TypegenError('no table or view named "nope" in the database'))
+    expect((await readSchema(db, { tables: ['v', 'orders', 'azora_files'] })).tables.map((t) => t.name)).toEqual([
+      'orders',
+      'azora_files',
+      'v',
+    ])
+    await expect(readSchema(db, { tables: ['orders', 'nope'] })).rejects.toThrow(
+      new TypegenError('no table or view named "nope" in the database'),
+    )
   })
 })
 
 describe('azora-gen', () => {
-  const schema: Schema = { tables: [table('orders', [{ name: 'id', type: 'INTEGER', pk: 1 }, { name: 'n', type: 'BIGINT' }])] }
+  const schema: Schema = {
+    tables: [
+      table('orders', [
+        { name: 'id', type: 'INTEGER', pk: 1 },
+        { name: 'n', type: 'BIGINT' },
+      ]),
+    ],
+  }
   const run = async (argv: string[], source: SchemaSource = async () => schema) => {
     let out = ''
     const err: string[] = []
@@ -229,12 +389,22 @@ describe('azora-gen', () => {
 
   test('--out writes, --check compares', async () => {
     const out = join(mkdtempSync(join(tmpdir(), 'azora-gen-')), 'nested', 'types.ts')
-    expect(await run(['--out', out, '--check'])).toMatchObject({ code: 1, err: expect.stringContaining('does not exist') })
-    expect(await run(['--out', out, '--bigint'])).toMatchObject({ code: 0, out: '', err: expect.stringContaining('wrote') })
+    expect(await run(['--out', out, '--check'])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining('does not exist'),
+    })
+    expect(await run(['--out', out, '--bigint'])).toMatchObject({
+      code: 0,
+      out: '',
+      err: expect.stringContaining('wrote'),
+    })
     const text = readFileSync(out, 'utf8')
     expect(text).toContain(`// Regenerate with: azora-gen --out ${out} --bigint`)
     expect(text).toContain('n: number | bigint | null')
-    expect(await run(['--out', out, '--bigint', '--check'])).toMatchObject({ code: 0, err: expect.stringContaining('up to date') })
+    expect(await run(['--out', out, '--bigint', '--check'])).toMatchObject({
+      code: 0,
+      err: expect.stringContaining('up to date'),
+    })
     expect(await run(['--out', out, '--bigint'])).toMatchObject({ code: 0, err: expect.stringContaining('no change') })
     // Another schema (here: other flags) no longer matches the file, and --check leaves it alone.
     expect(await run(['--out', out, '--check'])).toMatchObject({ code: 1, err: expect.stringContaining('out of date') })
@@ -254,8 +424,15 @@ describe('azora-gen', () => {
     expect(await run(['--nope'])).toMatchObject({ code: 2, err: expect.stringContaining('--help') })
     expect(await run(['--check'])).toMatchObject({ code: 2, err: expect.stringContaining('--check needs --out') })
     expect(await run(['--tables', ','])).toMatchObject({ code: 2 })
-    expect(await run([], async () => ({ tables: [] }))).toMatchObject({ code: 1, err: 'azora-gen: the database has no tables or views: nothing to generate' })
-    expect(await run([], async () => { throw new TypegenError('no table or view named "x" in the database') })).toMatchObject({ code: 1, err: expect.stringContaining('"x"') })
+    expect(await run([], async () => ({ tables: [] }))).toMatchObject({
+      code: 1,
+      err: 'azora-gen: the database has no tables or views: nothing to generate',
+    })
+    expect(
+      await run([], async () => {
+        throw new TypegenError('no table or view named "x" in the database')
+      }),
+    ).toMatchObject({ code: 1, err: expect.stringContaining('"x"') })
     expect((await run(['--help'])).out).toContain('Usage: azora-gen')
     expect((await run(['--version'])).out).toMatch(/^\d+\.\d+\.\d+/)
   })
@@ -266,8 +443,16 @@ describe('azora-gen', () => {
     writeFileSync(file, 'AZORA_URL=http://file/shop\nAZORA_API_KEY=azk_file\n')
     const base = { check: false, bigint: false }
     expect(settings({ ...base, 'env-file': file }, {})).toEqual({ url: 'http://file/shop', token: 'azk_file' })
-    expect(settings({ ...base, 'env-file': file }, { AZORA_URL: 'http://env/shop', AZORA_TOKEN: 'azk_env' })).toEqual({ url: 'http://env/shop', token: 'azk_env' })
-    expect(settings({ ...base, 'env-file': file, url: 'http://flag/shop', token: 'azk_flag' }, { AZORA_URL: 'http://env/shop' })).toEqual({ url: 'http://flag/shop', token: 'azk_flag' })
+    expect(settings({ ...base, 'env-file': file }, { AZORA_URL: 'http://env/shop', AZORA_TOKEN: 'azk_env' })).toEqual({
+      url: 'http://env/shop',
+      token: 'azk_env',
+    })
+    expect(
+      settings(
+        { ...base, 'env-file': file, url: 'http://flag/shop', token: 'azk_flag' },
+        { AZORA_URL: 'http://env/shop' },
+      ),
+    ).toEqual({ url: 'http://flag/shop', token: 'azk_flag' })
     expect(() => settings({ ...base, 'env-file': join(dir, 'missing') }, {})).toThrow(/no env file/)
     writeFileSync(file, 'AZORA_URL=http://file/shop\n')
     expect(() => settings({ ...base, 'env-file': file }, {})).toThrow(/no credential: pass --token or set AZORA_TOKEN/)
