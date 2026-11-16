@@ -28,10 +28,16 @@ export interface Transport {
 export type WebSocketCtor = new (url: string, protocols?: string | string[]) => WebSocket
 
 /** Opens a WebSocket transport to url; resolves once the socket is open. */
-export function connectWebSocket(url: string, ctor: WebSocketCtor | undefined, signal: AbortSignal): Promise<Transport> {
+export function connectWebSocket(
+  url: string,
+  ctor: WebSocketCtor | undefined,
+  signal: AbortSignal,
+): Promise<Transport> {
   const WS = ctor ?? (globalThis as { WebSocket?: WebSocketCtor }).WebSocket
   if (!WS) {
-    return Promise.reject(new ConnectionError('azora: this runtime has no WebSocket: pass one with the webSocket option'))
+    return Promise.reject(
+      new ConnectionError('azora: this runtime has no WebSocket: pass one with the webSocket option'),
+    )
   }
   return new Promise<Transport>((resolve, reject) => {
     let ws: WebSocket
@@ -105,7 +111,11 @@ export function connectWebSocket(url: string, ctor: WebSocketCtor | undefined, s
     }
     ws.onclose = (ev: CloseEvent) => {
       const clean = ev.code === 1000 || ev.code === 1001
-      finish(clean ? undefined : new ConnectionError(`azora: websocket closed (${ev.code}${ev.reason ? ' ' + ev.reason : ''})`))
+      finish(
+        clean
+          ? undefined
+          : new ConnectionError(`azora: websocket closed (${ev.code}${ev.reason ? ' ' + ev.reason : ''})`),
+      )
     }
   })
 }
