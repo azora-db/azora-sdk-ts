@@ -8,7 +8,10 @@ import { generateGo, goName, goPackage, type GoUnit } from '../src/tools.ts'
 
 const units: GoUnit[] = [
   {
-    name: 'checkout', kind: 'mutation', internal: false, description: 'Turns a cart into an order.',
+    name: 'checkout',
+    kind: 'mutation',
+    internal: false,
+    description: 'Turns a cart into an order.',
     args: v.object({
       cartId: v.string({ description: 'The cart to check out.' }),
       qty: v.optional(v.int()),
@@ -51,7 +54,9 @@ describe('Go types', () => {
     expect(src).toContain('\tCoupon *string `json:"coupon"`')
     expect(src).toContain('\tTags []string `json:"tags,omitempty"`')
     expect(src).toContain('\tAddress CheckoutArgsAddress `json:"address"`')
-    expect(src).toContain('type CheckoutArgsAddress struct {\n\tCity string `json:"city"`\n\tZip *string `json:"zip,omitempty"`\n}')
+    expect(src).toContain(
+      'type CheckoutArgsAddress struct {\n\tCity string `json:"city"`\n\tZip *string `json:"zip,omitempty"`\n}',
+    )
     expect(src).toContain('\tReceipt azora.Bytes `json:"receipt,omitempty"`')
     expect(src).toContain('\tStatus string `json:"status"`')
     expect(src).toContain('\tMeta map[string]float64 `json:"meta"`')
@@ -61,7 +66,9 @@ describe('Go types', () => {
     expect(src).toContain(
       'func Checkout[R any](ctx context.Context, db *azora.DB, args CheckoutArgs, opts ...azora.CallOption) (R, error) {\n\treturn azora.Call[R](ctx, db, "checkout", args, opts...)\n}',
     )
-    expect(src).toContain('func MyOrders[R any](ctx context.Context, db *azora.DB, args any, opts ...azora.CallOption) (R, error)')
+    expect(src).toContain(
+      'func MyOrders[R any](ctx context.Context, db *azora.DB, args any, opts ...azora.CallOption) (R, error)',
+    )
     expect(src).not.toContain('Audit')
     expect(src).not.toContain('Nightly')
     expect(generateGo([], { package: 'p' })).not.toContain('import')
@@ -70,11 +77,15 @@ describe('Go types', () => {
   // Compiles the output against the Go SDK next to this repository, when Go and the SDK are there.
   const sdk = new URL('../../../../azora-go', import.meta.url).pathname
   const go = spawnSync('go', ['version']).status === 0 && existsSync(join(sdk, 'go.mod'))
-  test.skipIf(!go)('the output compiles against azora-go', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'azora-units-go-'))
-    mkdirSync(join(dir, 'shopunits'))
-    writeFileSync(join(dir, 'shopunits', 'units.go'), generateGo(units, { package: 'shopunits' }))
-    writeFileSync(join(dir, 'main.go'), `package main
+  test.skipIf(!go)(
+    'the output compiles against azora-go',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'azora-units-go-'))
+      mkdirSync(join(dir, 'shopunits'))
+      writeFileSync(join(dir, 'shopunits', 'units.go'), generateGo(units, { package: 'shopunits' }))
+      writeFileSync(
+        join(dir, 'main.go'),
+        `package main
 
 import (
 	"context"
@@ -92,15 +103,34 @@ func main() {
 	_, _ = shopunits.Checkout[CheckoutResult](context.Background(), db, shopunits.CheckoutArgs{CartID: "c1"})
 	_, _ = shopunits.Lookup[[]string](context.Background(), db, shopunits.LookupArgs{"a"})
 }
-`)
-    // The SDK's own Go and toolchain lines, so the same toolchain builds it.
-    const versions = readFileSync(join(sdk, 'go.mod'), 'utf8').split('\n').filter((l) => /^(go|toolchain) /.test(l)).join('\n')
-    writeFileSync(join(dir, 'go.mod'), `module example.com/app\n\n${versions}\n\nrequire github.com/azora-db/azora-go v0.0.0\n\nreplace github.com/azora-db/azora-go => ${sdk}\n`)
-    copyFileSync(join(sdk, 'go.sum'), join(dir, 'go.sum'))
-    const r = spawnSync('go', ['vet', './...'], { cwd: dir, encoding: 'utf8', env: { ...process.env, GOFLAGS: '-mod=mod' } })
-    expect(r.stderr + r.stdout, 'go vet').toBe('')
-    expect(r.status).toBe(0)
-    const fmt = spawnSync('gofmt', ['-l', '.'], { cwd: dir, encoding: 'utf8' })
-    if (fmt.status === 0) expect(fmt.stdout.trim().split('\n').filter((f) => f.startsWith('shopunits'))).toEqual(['shopunits/units.go']) // aligned only by gofmt
-  }, 120_000)
+`,
+      )
+      // The SDK's own Go and toolchain lines, so the same toolchain builds it.
+      const versions = readFileSync(join(sdk, 'go.mod'), 'utf8')
+        .split('\n')
+        .filter((l) => /^(go|toolchain) /.test(l))
+        .join('\n')
+      writeFileSync(
+        join(dir, 'go.mod'),
+        `module example.com/app\n\n${versions}\n\nrequire github.com/azora-db/azora-go v0.0.0\n\nreplace github.com/azora-db/azora-go => ${sdk}\n`,
+      )
+      copyFileSync(join(sdk, 'go.sum'), join(dir, 'go.sum'))
+      const r = spawnSync('go', ['vet', './...'], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: { ...process.env, GOFLAGS: '-mod=mod' },
+      })
+      expect(r.stderr + r.stdout, 'go vet').toBe('')
+      expect(r.status).toBe(0)
+      const fmt = spawnSync('gofmt', ['-l', '.'], { cwd: dir, encoding: 'utf8' })
+      if (fmt.status === 0)
+        expect(
+          fmt.stdout
+            .trim()
+            .split('\n')
+            .filter((f) => f.startsWith('shopunits')),
+        ).toEqual(['shopunits/units.go']) // aligned only by gofmt
+    },
+    120_000,
+  )
 })
