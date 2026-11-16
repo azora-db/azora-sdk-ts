@@ -1,6 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
-  and, connect, eq, gt, Replica, RetryVerifyError, type Database, type LiveEvent, type Subscription, type Update, type VerifyResult,
+  and,
+  connect,
+  eq,
+  gt,
+  Replica,
+  RetryVerifyError,
+  type Database,
+  type LiveEvent,
+  type Subscription,
+  type Update,
+  type VerifyResult,
 } from '../../src/index.ts'
 import { engineBinary, startEngine, type Engine } from '../helpers/engine.ts'
 import { until } from '../helpers/wait.ts'
@@ -46,7 +56,13 @@ describe.skipIf(!engineBinary())('subscriptions and live queries', () => {
     const snap = await sub.next()
     expect(snap).toMatchObject({ reset: true, snapshot: true })
     expect(snap.changes.map((c) => c.key[0])).toEqual([12, 14, 16, 18, 20])
-    expect(snap.changes[0]).toMatchObject({ op: 'insert', table: 'orders', columns: ['id', 'customer', 'status', 'total', 'note'], pk: ['id'], seq: 0 })
+    expect(snap.changes[0]).toMatchObject({
+      op: 'insert',
+      table: 'orders',
+      columns: ['id', 'customer', 'status', 'total', 'note'],
+      pk: ['id'],
+      seq: 0,
+    })
     expect(snap.changes[0]?.new).toEqual([12, 0, 'paid', 120, null])
     expect(snap.checkpoint).toBeGreaterThan(0)
 
@@ -71,7 +87,9 @@ describe.skipIf(!engineBinary())('subscriptions and live queries', () => {
   test('filter text is the same as a built filter', async () => {
     const a = await db.subscribe({ table: 'orders', where: "status = 'open' AND customer IN (1, 3) AND note IS NULL" })
     const snap = await a.next()
-    const want = await db.query<Order>("SELECT id FROM orders WHERE status = 'open' AND customer IN (1, 3) AND note IS NULL ORDER BY id")
+    const want = await db.query<Order>(
+      "SELECT id FROM orders WHERE status = 'open' AND customer IN (1, 3) AND note IS NULL ORDER BY id",
+    )
     expect(snap.changes.map((c) => c.key[0])).toEqual(want.map((o) => o.id))
     await a.close()
     await expect(db.subscribe({ table: 'orders', where: 'nope = 1' })).rejects.toMatchObject({ code: 'invalid' })
@@ -117,7 +135,17 @@ describe.skipIf(!engineBinary())('subscriptions and live queries', () => {
     expect(res.match).toBe(true)
     expect(rep.get('orders', 3)?.[3]).toBe(77)
     // A local row that differs is caught.
-    rep.applyChange({ seq: 0, table: 'orders', op: 'update', key: [3], new: [3, 3, 'open', 78, null], old: null, columns: [], pk: [], tv: 0 })
+    rep.applyChange({
+      seq: 0,
+      table: 'orders',
+      op: 'update',
+      key: [3],
+      new: [3, 3, 'open', 78, null],
+      old: null,
+      columns: [],
+      pk: [],
+      tv: 0,
+    })
     expect((await verified(sub, rep)).match).toBe(false)
     await sub.close()
   })
@@ -202,7 +230,11 @@ describe.skipIf(!engineBinary())('subscriptions and live queries', () => {
 
   test('live query with verifyEvery checks itself against the server', async () => {
     const results: VerifyResult[] = []
-    const live = await db.live<Order>('orders', { where: eq('customer', 1), verifyEvery: 25, onVerify: (r) => results.push(r) })
+    const live = await db.live<Order>('orders', {
+      where: eq('customer', 1),
+      verifyEvery: 25,
+      onVerify: (r) => results.push(r),
+    })
     await until(() => results.length >= 1, 'the first periodic check')
     expect(results[0]).toMatchObject({ match: true, serverRows: live.size, localRows: live.size })
     // Checks keep passing while the rows change.
@@ -210,7 +242,10 @@ describe.skipIf(!engineBinary())('subscriptions and live queries', () => {
     for (let i = 0; i < 5; i++) await insert(1, 'open', 7000 + i)
     await until(() => live.rows.some((o) => o.total === 7004), 'the inserts')
     const rows = live.size
-    await until(() => results.length > before && results[results.length - 1]?.localRows === rows, 'a check after the inserts')
+    await until(
+      () => results.length > before && results[results.length - 1]?.localRows === rows,
+      'a check after the inserts',
+    )
     expect(results.every((r) => r.match)).toBe(true)
     expect(live.lastVerify).toBe(results[results.length - 1])
     expect(live.mismatches).toBe(0)
