@@ -10,7 +10,10 @@ describe.skipIf(!engineBinary())('file storage', () => {
 
   beforeAll(async () => {
     engine = await startEngine({
-      schema: ['CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, avatar FILE)', "INSERT INTO users(id, name) VALUES (1, 'ann')"],
+      schema: [
+        'CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, avatar FILE)',
+        "INSERT INTO users(id, name) VALUES (1, 'ann')",
+      ],
       publish: [],
       tokens: { writer: ['--sub', 'user:9', '--scope', 'read,write'], reader: ['--sub', 'user:8', '--scope', 'read'] },
     })
@@ -23,7 +26,13 @@ describe.skipIf(!engineBinary())('file storage', () => {
 
   test('upload, stat, download, ranges, list, delete', async () => {
     const obj = await db.storage.upload('hello, storage', { path: 'notes/hello.txt', contentType: 'text/plain' })
-    expect(obj).toMatchObject({ bucket: 'default', path: 'notes/hello.txt', name: 'hello.txt', contentType: 'text/plain', size: 14 })
+    expect(obj).toMatchObject({
+      bucket: 'default',
+      path: 'notes/hello.txt',
+      name: 'hello.txt',
+      contentType: 'text/plain',
+      size: 14,
+    })
     expect(obj.sha256).toBe(createHash('sha256').update('hello, storage').digest('hex'))
     expect(obj.createdAt).toBeInstanceOf(Date)
     expect(await db.storage.stat(obj.id)).toEqual(obj)
@@ -36,7 +45,10 @@ describe.skipIf(!engineBinary())('file storage', () => {
     expect(new Uint8Array(await (await db.storage.download(bin.id)).arrayBuffer())).toEqual(bytes)
     await db.storage.upload(new Blob(['a,b\n1,2\n'], { type: 'text/csv' }), { path: 'data/table.csv' })
 
-    expect((await db.storage.list({ prefix: 'data/' })).objects.map((o) => o.path).sort()).toEqual(['data/blob.bin', 'data/table.csv'])
+    expect((await db.storage.list({ prefix: 'data/' })).objects.map((o) => o.path).sort()).toEqual([
+      'data/blob.bin',
+      'data/table.csv',
+    ])
     const page = await db.storage.list({ limit: 2 })
     expect(page.objects).toHaveLength(2)
     expect(page.next).toBeTruthy()
@@ -68,28 +80,50 @@ describe.skipIf(!engineBinary())('file storage', () => {
 
   test('a signed upload URL fills a row column', async () => {
     const grant = await db.storage.signUploadUrl({
-      bucket: 'default', maxSize: 1 << 20, allowedTypes: 'image/png', table: 'users', column: 'avatar', keyValue: '1', ttlSeconds: 60,
+      bucket: 'default',
+      maxSize: 1 << 20,
+      allowedTypes: 'image/png',
+      table: 'users',
+      column: 'avatar',
+      keyValue: '1',
+      ttlSeconds: 60,
     })
-    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0))
+    const png = Uint8Array.from(
+      atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='),
+      (c) => c.charCodeAt(0),
+    )
     const obj = await uploadToSignedUrl(grant.url, png, { contentType: 'image/png' })
     expect(obj.contentType).toBe('image/png')
     expect(await db.queryValue('SELECT avatar FROM users WHERE id = 1')).toBe(obj.id)
-    await expect(uploadToSignedUrl(grant.url, 'not a png', { contentType: 'text/plain' })).rejects.toBeInstanceOf(AzoraError)
+    await expect(uploadToSignedUrl(grant.url, 'not a png', { contentType: 'text/plain' })).rejects.toBeInstanceOf(
+      AzoraError,
+    )
     const url = await db.queryValue<string>('SELECT azora_url(avatar) FROM users WHERE id = 1')
     expect(new Uint8Array(await (await fetch(url as string)).arrayBuffer())).toEqual(png)
   })
 
   test('a client token signs an upload URL over the connection', async () => {
-    const app = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { token: engine.tokens['writer'] as string })
-    const reader = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { token: engine.tokens['reader'] as string })
+    const app = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, {
+      token: engine.tokens['writer'] as string,
+    })
+    const reader = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, {
+      token: engine.tokens['reader'] as string,
+    })
     try {
-      const grant = await app.signUploadUrl({ path: 'from-app/note.txt', maxSize: 64, allowedTypes: 'text/plain', ttlSeconds: 60 })
+      const grant = await app.signUploadUrl({
+        path: 'from-app/note.txt',
+        maxSize: 64,
+        allowedTypes: 'text/plain',
+        ttlSeconds: 60,
+      })
       expect(grant.url).toContain('/storage/v1/u/shop')
       expect(grant.sessionUrl).toContain('/storage/v1/s/shop')
       expect(grant.expiresAt.getTime()).toBeGreaterThan(Date.now())
       const obj = await uploadToSignedUrl(grant.url, 'from the app', { contentType: 'text/plain' })
       expect(obj.path).toBe('from-app/note.txt')
-      await expect(uploadToSignedUrl(grant.url, 'x'.repeat(100), { contentType: 'text/plain' })).rejects.toBeInstanceOf(AzoraError)
+      await expect(uploadToSignedUrl(grant.url, 'x'.repeat(100), { contentType: 'text/plain' })).rejects.toBeInstanceOf(
+        AzoraError,
+      )
       // No write scope, no link.
       await expect(reader.signUploadUrl()).rejects.toMatchObject({ code: 'permission_denied' })
       await expect(app.signUploadUrl({ ttlSeconds: -1 })).rejects.toThrow(TypeError)
@@ -105,10 +139,16 @@ describe.skipIf(!engineBinary())('file storage', () => {
       if (init?.method === 'PATCH' && ++patches === 3) throw new TypeError('network down')
       return fetch(input, init)
     }
-    const flakyDb = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, { apiKey: engine.apiKey, fetch: flaky })
+    const flakyDb = await connect(`${engine.wsUrl}?db=shop&key=${engine.serverKey}`, {
+      apiKey: engine.apiKey,
+      fetch: flaky,
+    })
     const progress: number[] = []
     const obj = await flakyDb.storage.uploadResumable(bytes, {
-      path: 'big/video.bin', chunkSize: 128 << 10, contentType: 'application/octet-stream', onProgress: (sent) => progress.push(sent),
+      path: 'big/video.bin',
+      chunkSize: 128 << 10,
+      contentType: 'application/octet-stream',
+      onProgress: (sent) => progress.push(sent),
     })
     expect(obj.size).toBe(bytes.length)
     expect(obj.sha256).toBe(createHash('sha256').update(bytes).digest('hex'))
@@ -125,7 +165,9 @@ describe.skipIf(!engineBinary())('file storage', () => {
     let sentBefore = 0
     const first = await db.storage
       .uploadResumable(bytes, {
-        path: 'big/resumed.bin', chunkSize: 128 << 10, signal: stop.signal,
+        path: 'big/resumed.bin',
+        chunkSize: 128 << 10,
+        signal: stop.signal,
         onSession: (url) => (stored = url),
         onProgress: (sent) => {
           sentBefore = sent
@@ -154,7 +196,10 @@ describe.skipIf(!engineBinary())('file storage', () => {
     const tcp = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.apiKey })
     await expect(tcp.storage.list()).rejects.toThrow(/storageUrl/)
     await tcp.close()
-    const reader = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.readKey, storageUrl: engine.httpUrl })
+    const reader = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, {
+      apiKey: engine.readKey,
+      storageUrl: engine.httpUrl,
+    })
     expect((await reader.storage.list()).objects.length).toBeGreaterThan(0)
     await expect(reader.storage.upload('x', { path: 'denied.txt' })).rejects.toMatchObject({ status: 403 })
     await reader.close()
