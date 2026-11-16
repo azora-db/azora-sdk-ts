@@ -45,7 +45,13 @@ class FakeSub {
     const l = c.local()
     const sum = BigInt.asUintN(64, l.sum)
     const res: VerifyResult = {
-      match: false, checkpoint: 1, epoch: 1n, serverRows, serverSum: serverSum ?? sum, localRows: l.rows, localSum: sum,
+      match: false,
+      checkpoint: 1,
+      epoch: 1n,
+      serverRows,
+      serverSum: serverSum ?? sum,
+      localRows: l.rows,
+      localSum: sum,
     }
     res.match = res.localRows === res.serverRows && res.localSum === res.serverSum
     c.resolve(res)
@@ -70,7 +76,15 @@ class FakeSub {
 }
 
 function change(id: number, v: string): Change {
-  return { op: 'insert', table: 't', key: [id], columns: ['id', 'v'], pk: ['id'], new: [id, v], seq: 0 } as unknown as Change
+  return {
+    op: 'insert',
+    table: 't',
+    key: [id],
+    columns: ['id', 'v'],
+    pk: ['id'],
+    new: [id, v],
+    seq: 0,
+  } as unknown as Change
 }
 
 function update(reset: boolean, ...changes: Change[]): Update {
