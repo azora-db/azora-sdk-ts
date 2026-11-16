@@ -22,7 +22,11 @@ export interface PublishResult extends DeployResult {
  * const { version, units } = await publishUnits(db, 'units', { note: 'release 12' })
  * ```
  */
-export async function publishUnits(db: { unitsAdmin: UnitsAdmin }, dir = 'units', o: PublishOptions = {}): Promise<PublishResult> {
+export async function publishUnits(
+  db: { unitsAdmin: UnitsAdmin },
+  dir = 'units',
+  o: PublishOptions = {},
+): Promise<PublishResult> {
   const built = await bundleUnits(dir, o)
   const r = await db.unitsAdmin.deploy({
     bundle: built.bundle,
