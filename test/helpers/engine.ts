@@ -99,12 +99,15 @@ export async function startEngine(o: EngineOptions = {}): Promise<Engine> {
   const publish = o.publish ?? ['orders', 'items', 'kv', 'files']
   if (publish.length > 0) cli('realtime', 'publish', 'shop', ...publish, '--json')
   const key = (name: string, scope: string): string =>
-    (JSON.parse(cli('meta', 'key', 'create', 'shop', '--name', name, '--scope', scope, '--json')) as { secret: string }).secret
+    (JSON.parse(cli('meta', 'key', 'create', 'shop', '--name', name, '--scope', scope, '--json')) as { secret: string })
+      .secret
   const apiKey = key('app', 'read,write,ddl')
   const readKey = key('reader', 'read')
   const tokens: Record<string, string> = {}
   for (const [name, args] of Object.entries(o.tokens ?? {})) {
-    tokens[name] = (JSON.parse(cli('realtime', 'token', 'create', 'shop', ...args, '--json')) as { token: string }).token
+    tokens[name] = (
+      JSON.parse(cli('realtime', 'token', 'create', 'shop', ...args, '--json')) as { token: string }
+    ).token
   }
   const http = await freePort()
   const tcp = await freePort()
@@ -132,7 +135,17 @@ export async function startEngine(o: EngineOptions = {}): Promise<Engine> {
       if (child) return
       const p = spawn(
         bin,
-        ['--config', config, 'serve', '--addr', `127.0.0.1:${http}`, '--rt-addr', `127.0.0.1:${tcp}`, '--public-url', e.httpUrl],
+        [
+          '--config',
+          config,
+          'serve',
+          '--addr',
+          `127.0.0.1:${http}`,
+          '--rt-addr',
+          `127.0.0.1:${tcp}`,
+          '--public-url',
+          e.httpUrl,
+        ],
         { stdio: ['ignore', 'pipe', 'pipe'] },
       )
       child = p
