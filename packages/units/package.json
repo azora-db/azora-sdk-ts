@@ -1,22 +1,19 @@
 {
   "name": "@azora-db/units",
   "version": "0.1.0",
-  "description": "Write Azora DB units in TypeScript: query, mutation and action functions that run inside the database, and the azora-units CLI that publishes them",
-  "type": "module",
-  "license": "Apache-2.0",
   "private": true,
-  "sideEffects": false,
-  "engines": {
-    "node": ">=22"
+  "description": "Write Azora DB units in TypeScript: query, mutation and action functions that run inside the database, and the azora-units CLI that publishes them",
+  "license": "Apache-2.0",
+  "bin": {
+    "azora-units": "./dist/cli.js"
   },
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md"
   ],
-  "bin": {
-    "azora-units": "./dist/cli.js"
-  },
+  "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -45,5 +42,8 @@
     "@types/node": "^26.6.6",
     "typescript": "~7.0.2",
     "vitest": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
