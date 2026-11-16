@@ -14,7 +14,7 @@ const SCHEMA = [
   'CREATE TABLE order_items(order_id INTEGER NOT NULL, sku TEXT NOT NULL, qty INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(order_id, sku)) WITHOUT ROWID',
   'CREATE TABLE kv(k TEXT PRIMARY KEY, v BLOB)',
   'CREATE TABLE "odd name"("first name" TEXT, "2nd" BOOL)',
-  'CREATE VIEW open_orders AS SELECT id, status, total * 2 AS doubled FROM orders WHERE status = \'open\'',
+  "CREATE VIEW open_orders AS SELECT id, status, total * 2 AS doubled FROM orders WHERE status = 'open'",
   'ANALYZE', // makes sqlite_stat1, which is not an application table
 ]
 
@@ -36,7 +36,13 @@ describe.skipIf(!engineBinary())('row types from the schema', () => {
 
   test('readSchema reads tables, views and columns, without internal tables', async () => {
     const schema = await readSchema(db)
-    expect(schema.tables.map((t) => `${t.kind} ${t.name}`)).toEqual(['table orders', 'table order_items', 'table kv', 'table odd name', 'view open_orders'])
+    expect(schema.tables.map((t) => `${t.kind} ${t.name}`)).toEqual([
+      'table orders',
+      'table order_items',
+      'table kv',
+      'table odd name',
+      'view open_orders',
+    ])
     expect(schema.tables[0]?.columns).toEqual([
       { name: 'id', type: 'INTEGER', notNull: false, pk: 1, hasDefault: false, generated: false },
       { name: 'customer', type: 'INTEGER', notNull: true, pk: 0, hasDefault: false, generated: false },
@@ -116,13 +122,25 @@ describe.skipIf(!engineBinary())('row types from the schema', () => {
   test('the types describe what queries return', async () => {
     const admin = await connect(`${engine.tcpUrl}?key=${engine.serverKey}`, { apiKey: engine.apiKey })
     try {
-      await admin.exec("INSERT INTO orders(customer, total, paid, meta, photo, price) VALUES (7, 12.5, 1, '{\"a\":1}', x'0102', 9.99)")
+      await admin.exec(
+        "INSERT INTO orders(customer, total, paid, meta, photo, price) VALUES (7, 12.5, 1, '{\"a\":1}', x'0102', 9.99)",
+      )
       await admin.exec('INSERT INTO "odd name" VALUES (\'Ada\', 1)')
     } finally {
       await admin.close()
     }
     expect(await db.queryOne('SELECT * FROM orders')).toEqual({
-      id: 1, customer: 7, status: 'open', total: 12.5, paid: 1, meta: '{"a":1}', note: null, photo: Uint8Array.of(1, 2), price: 9.99, anything: null, total_cents: 1250,
+      id: 1,
+      customer: 7,
+      status: 'open',
+      total: 12.5,
+      paid: 1,
+      meta: '{"a":1}',
+      note: null,
+      photo: Uint8Array.of(1, 2),
+      price: 9.99,
+      anything: null,
+      total_cents: 1250,
     })
     // BOOLEAN comes back as a boolean, BOOL as the stored integer.
     expect(await db.queryOne('SELECT * FROM "odd name"')).toEqual({ 'first name': 'Ada', '2nd': 1 })
@@ -146,7 +164,18 @@ export { bad, n, o, odd, t }
 `,
     )
     const tsc = fileURLToPath(new URL('../../node_modules/typescript/bin/tsc', import.meta.url))
-    const args = [tsc, '--noEmit', '--strict', '--exactOptionalPropertyTypes', '--allowImportingTsExtensions', '--module', 'nodenext', '--target', 'es2022', join(dir, 'use.ts')]
+    const args = [
+      tsc,
+      '--noEmit',
+      '--strict',
+      '--exactOptionalPropertyTypes',
+      '--allowImportingTsExtensions',
+      '--module',
+      'nodenext',
+      '--target',
+      'es2022',
+      join(dir, 'use.ts'),
+    ]
     try {
       execFileSync(process.execPath, args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' })
     } catch (e) {
@@ -180,11 +209,20 @@ export { bad, n, o, odd, t }
     } finally {
       await admin.close()
     }
-    expect(await run(...token, '--out', out, '--check')).toMatchObject({ code: 1, err: expect.stringContaining('out of date') })
+    expect(await run(...token, '--out', out, '--check')).toMatchObject({
+      code: 1,
+      err: expect.stringContaining('out of date'),
+    })
 
-    expect(await run(...token, '--tables', 'nowhere')).toMatchObject({ code: 1, err: 'azora-gen: no table or view named "nowhere" in the database' })
+    expect(await run(...token, '--tables', 'nowhere')).toMatchObject({
+      code: 1,
+      err: 'azora-gen: no table or view named "nowhere" in the database',
+    })
     expect(await run('--token', 'azk_wrong')).toMatchObject({ code: 1, stdout: '' })
     expect(await run()).toMatchObject({ code: 1, err: expect.stringContaining('no credential') })
-    expect(await run(...token, '--url', 'azora://127.0.0.1:1/shop?key=' + engine.serverKey)).toMatchObject({ code: 1, err: expect.stringContaining('cannot reach the database') })
+    expect(await run(...token, '--url', 'azora://127.0.0.1:1/shop?key=' + engine.serverKey)).toMatchObject({
+      code: 1,
+      err: expect.stringContaining('cannot reach the database'),
+    })
   })
 })
