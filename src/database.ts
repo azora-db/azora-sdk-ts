@@ -156,7 +156,11 @@ export class Database<M = unknown> {
   /** The first column of the first row (`SELECT count(*) …`), or undefined when there is no row. */
   async queryValue<T extends Value = Value>(sql: string, args?: Args, opts?: CallOptions): Promise<T | undefined>
   async queryValue<T extends Value = Value>(statement: Statement, opts?: CallOptions): Promise<T | undefined>
-  async queryValue<T extends Value = Value>(a: string | Statement, b?: Args | CallOptions, c?: CallOptions): Promise<T | undefined> {
+  async queryValue<T extends Value = Value>(
+    a: string | Statement,
+    b?: Args | CallOptions,
+    c?: CallOptions,
+  ): Promise<T | undefined> {
     const { sql, args, opts } = unpack<CallOptions>(a, b, c)
     const r = await this.pick().query(sql, args, 1, opts)
     const row = r.rows[0]
@@ -287,7 +291,11 @@ export class Database<M = unknown> {
    * changed", for example after a reconnect. Returns the function that
    * stops watching.
    */
-  async watch(tables: readonly string[], listener: (tables: string[]) => void, opts?: CallOptions): Promise<() => Promise<void>> {
+  async watch(
+    tables: readonly string[],
+    listener: (tables: string[]) => void,
+    opts?: CallOptions,
+  ): Promise<() => Promise<void>> {
     const sub = await this.main.subscribe({ kind: 'notify', tables }, opts)
     void (async () => {
       for (;;) {
@@ -314,7 +322,8 @@ export class Database<M = unknown> {
    * (works with client tokens too). `ttlSeconds` 0 is the server's default.
    */
   async signUrl(objectId: string, ttlSeconds = 0, opts?: CallOptions): Promise<{ url: string; expiresAt: Date }> {
-    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 0xffffffff) throw new TypeError(`azora: ttlSeconds ${ttlSeconds} out of range`)
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 0xffffffff)
+      throw new TypeError(`azora: ttlSeconds ${ttlSeconds} out of range`)
     const s = await this.pick().sign(objectId, ttlSeconds, opts)
     return { url: s.url, expiresAt: new Date(s.expiresAtMs) }
   }
@@ -332,16 +341,32 @@ export class Database<M = unknown> {
    * await uploadToSignedUrl(url, file)
    * ```
    */
-  async signUploadUrl(g: Omit<UploadGrant, 'signal'> = {}, opts?: CallOptions): Promise<{ url: string; sessionUrl: string; expiresAt: Date }> {
+  async signUploadUrl(
+    g: Omit<UploadGrant, 'signal'> = {},
+    opts?: CallOptions,
+  ): Promise<{ url: string; sessionUrl: string; expiresAt: Date }> {
     const ttl = g.ttlSeconds ?? 0
-    if (!Number.isInteger(ttl) || ttl < 0 || ttl > 0xffffffff) throw new TypeError(`azora: ttlSeconds ${ttl} out of range`)
+    if (!Number.isInteger(ttl) || ttl < 0 || ttl > 0xffffffff)
+      throw new TypeError(`azora: ttlSeconds ${ttl} out of range`)
     const f = this.discovery?.features
     if (f && !f.includes('sign-upload')) {
-      throw new AzoraError(ErrorCode.Unavailable, 'this server does not sign upload URLs over the connection (its /.well-known/azora.json does not list "sign-upload" in features): use db.storage.signUploadUrl')
+      throw new AzoraError(
+        ErrorCode.Unavailable,
+        'this server does not sign upload URLs over the connection (its /.well-known/azora.json does not list "sign-upload" in features): use db.storage.signUploadUrl',
+      )
     }
     const grant = JSON.stringify({
-      bucket: g.bucket, path: g.path, overwrite: g.overwrite, allowed_types: g.allowedTypes, max_size: g.maxSize, keep: g.keep,
-      metadata: g.metadata, table: g.table, column: g.column, key: g.key, key_value: g.keyValue,
+      bucket: g.bucket,
+      path: g.path,
+      overwrite: g.overwrite,
+      allowed_types: g.allowedTypes,
+      max_size: g.maxSize,
+      keep: g.keep,
+      metadata: g.metadata,
+      table: g.table,
+      column: g.column,
+      key: g.key,
+      key_value: g.keyValue,
     })
     const s = await this.pick().signUpload(grant === '{}' ? '' : grant, ttl, opts)
     return { url: s.url, sessionUrl: sessionUrlOf(s.url), expiresAt: new Date(s.expiresAtMs) }
@@ -381,7 +406,10 @@ export class Database<M = unknown> {
   private checkUnits(): void {
     const f = this.discovery?.features
     if (f && !f.includes('units')) {
-      throw new AzoraError(ErrorCode.Unavailable, 'this server does not support units (its /.well-known/azora.json does not list "units" in features)')
+      throw new AzoraError(
+        ErrorCode.Unavailable,
+        'this server does not support units (its /.well-known/azora.json does not list "units" in features)',
+      )
     }
   }
 
@@ -461,9 +489,15 @@ export class Database<M = unknown> {
  * Give the type of your units module to type `db.units`:
  * `connect<typeof import('./units')>(url, { token })`.
  */
-export function connect<M = unknown>(url: string, options?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database<M>>
+export function connect<M = unknown>(
+  url: string,
+  options?: Omit<ConnectOptions, 'url'> & CallOptions,
+): Promise<Database<M>>
 export function connect<M = unknown>(options: ConnectOptions & CallOptions): Promise<Database<M>>
-export function connect<M = unknown>(a: string | (ConnectOptions & CallOptions), b?: Omit<ConnectOptions, 'url'> & CallOptions): Promise<Database<M>> {
+export function connect<M = unknown>(
+  a: string | (ConnectOptions & CallOptions),
+  b?: Omit<ConnectOptions, 'url'> & CallOptions,
+): Promise<Database<M>> {
   const o: ConnectOptions & CallOptions = typeof a === 'string' ? { ...b, url: a } : a
   const { signal, timeoutMs, ...options } = o
   const call: CallOptions = {}
@@ -487,11 +521,15 @@ export function connect<M = unknown>(a: string | (ConnectOptions & CallOptions),
  * Where there is no `process.env` (browsers), pass the values to
  * {@link connect}.
  */
-export async function connectEnv<M = unknown>(options: Omit<ConnectOptions, 'url'> & CallOptions = {}): Promise<Database<M>> {
+export async function connectEnv<M = unknown>(
+  options: Omit<ConnectOptions, 'url'> & CallOptions = {},
+): Promise<Database<M>> {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
   const url = env['AZORA_URL']
   if (!url) {
-    throw new TypeError('azora: connectEnv: AZORA_URL is not set (the database\'s address, for example https://db.example.com/shop?key=<server key>)')
+    throw new TypeError(
+      "azora: connectEnv: AZORA_URL is not set (the database's address, for example https://db.example.com/shop?key=<server key>)",
+    )
   }
   const o: ConnectOptions & CallOptions = { ...options }
   const given = [o.token, o.apiKey, o.credential].some((c) => c !== undefined && c !== '')
