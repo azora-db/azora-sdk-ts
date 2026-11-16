@@ -2,7 +2,21 @@ import { describe, expect, test } from 'vitest'
 import { Channel, openChannel } from '../../src/channel.ts'
 import { parseUrl, resolveOptions } from '../../src/config.ts'
 import {
-  and, compareValues, decodeServerKey, encodeServerKey, eq, FilterError, gt, inList, isNull, keyString, not, notNull, or, parseFilter, sql,
+  and,
+  compareValues,
+  decodeServerKey,
+  encodeServerKey,
+  eq,
+  FilterError,
+  gt,
+  inList,
+  isNull,
+  keyString,
+  not,
+  notNull,
+  or,
+  parseFilter,
+  sql,
   startsWith,
 } from '../../src/index.ts'
 import { generateKeyPair, HandshakeState, type Pattern } from '../../src/noise.ts'
@@ -15,36 +29,83 @@ describe('connection strings', () => {
   const key = 'AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tk'
 
   test('every documented form', () => {
-    expect(parseUrl(`azora://db.example.com/shop?key=${key}`)).toEqual({ host: 'db.example.com', port: 7480, database: 'shop', serverKey: key })
-    expect(parseUrl('azora://10.0.0.1:9000/shop?fp=azp1-aaaa-bbbb-cccc-dddd-eeee-ffff')).toMatchObject({ host: '10.0.0.1', port: 9000, fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff' })
-    expect(parseUrl('azora://[::1]:7480/?db=shop&plaintext=1')).toEqual({ host: '::1', port: 7480, database: 'shop', allowPlaintext: true })
-    expect(parseUrl(`azoras+ws://db.example.com?db=shop&key=${key}`)).toMatchObject({ webSocketUrl: 'wss://db.example.com/rt/v1', database: 'shop' })
-    expect(parseUrl(`azora+ws://localhost:8080/custom/path?db=shop&key=${key}`).webSocketUrl).toBe('ws://localhost:8080/custom/path')
+    expect(parseUrl(`azora://db.example.com/shop?key=${key}`)).toEqual({
+      host: 'db.example.com',
+      port: 7480,
+      database: 'shop',
+      serverKey: key,
+    })
+    expect(parseUrl('azora://10.0.0.1:9000/shop?fp=azp1-aaaa-bbbb-cccc-dddd-eeee-ffff')).toMatchObject({
+      host: '10.0.0.1',
+      port: 9000,
+      fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff',
+    })
+    expect(parseUrl('azora://[::1]:7480/?db=shop&plaintext=1')).toEqual({
+      host: '::1',
+      port: 7480,
+      database: 'shop',
+      allowPlaintext: true,
+    })
+    expect(parseUrl(`azoras+ws://db.example.com?db=shop&key=${key}`)).toMatchObject({
+      webSocketUrl: 'wss://db.example.com/rt/v1',
+      database: 'shop',
+    })
+    expect(parseUrl(`azora+ws://localhost:8080/custom/path?db=shop&key=${key}`).webSocketUrl).toBe(
+      'ws://localhost:8080/custom/path',
+    )
     expect(parseUrl(`wss://db.example.com/rt/v1?db=shop&key=${key}`).webSocketUrl).toBe('wss://db.example.com/rt/v1')
     expect(parseUrl(`  ws://localhost:8080?db=shop&key=${key}  `).webSocketUrl).toBe('ws://localhost:8080/rt/v1')
   })
 
   test('http(s) URLs: the database is the last path segment, the rest is derived', () => {
     expect(parseUrl(`https://db.example.com/shop?key=${key}`)).toEqual({
-      database: 'shop', serverKey: key, webSocketUrl: 'wss://db.example.com/rt/v1', storageUrl: 'https://db.example.com',
+      database: 'shop',
+      serverKey: key,
+      webSocketUrl: 'wss://db.example.com/rt/v1',
+      storageUrl: 'https://db.example.com',
     })
-    expect(parseUrl('http://127.0.0.1:8090/shop')).toEqual({ database: 'shop', webSocketUrl: 'ws://127.0.0.1:8090/rt/v1', storageUrl: 'http://127.0.0.1:8090' })
+    expect(parseUrl('http://127.0.0.1:8090/shop')).toEqual({
+      database: 'shop',
+      webSocketUrl: 'ws://127.0.0.1:8090/rt/v1',
+      storageUrl: 'http://127.0.0.1:8090',
+    })
     // A prefix before the database belongs to the server's address.
     expect(parseUrl(`https://example.com:8443/azora/eu/shop?key=${key}`)).toMatchObject({
-      database: 'shop', webSocketUrl: 'wss://example.com:8443/azora/eu/rt/v1', storageUrl: 'https://example.com:8443/azora/eu',
+      database: 'shop',
+      webSocketUrl: 'wss://example.com:8443/azora/eu/rt/v1',
+      storageUrl: 'https://example.com:8443/azora/eu',
     })
     expect(parseUrl('HTTPS://DB.Example.com/shop/?fp=azp1-aaaa-bbbb-cccc-dddd-eeee-ffff')).toEqual({
-      database: 'shop', fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff', webSocketUrl: 'wss://db.example.com/rt/v1', storageUrl: 'https://db.example.com',
+      database: 'shop',
+      fingerprint: 'azp1-aaaa-bbbb-cccc-dddd-eeee-ffff',
+      webSocketUrl: 'wss://db.example.com/rt/v1',
+      storageUrl: 'https://db.example.com',
     })
     expect(parseUrl('http://[::1]:8090/my%20shop?plaintext=1')).toEqual({
-      database: 'my shop', allowPlaintext: true, webSocketUrl: 'ws://[::1]:8090/rt/v1', storageUrl: 'http://[::1]:8090',
+      database: 'my shop',
+      allowPlaintext: true,
+      webSocketUrl: 'ws://[::1]:8090/rt/v1',
+      storageUrl: 'http://[::1]:8090',
     })
     expect(resolveOptions({ url: `https://db.example.com/pre/shop?key=${key}`, token: 't' })).toMatchObject({
-      database: 'shop', webSocketUrl: 'wss://db.example.com/pre/rt/v1', storageUrl: 'https://db.example.com/pre', host: '', discovery: null, credential: 't',
+      database: 'shop',
+      webSocketUrl: 'wss://db.example.com/pre/rt/v1',
+      storageUrl: 'https://db.example.com/pre',
+      host: '',
+      discovery: null,
+      credential: 't',
     })
     // Options still win over the URL.
-    expect(resolveOptions({ url: `https://db.example.com/shop?key=${key}`, token: 't', storageUrl: 'https://files.example.com/' }).storageUrl).toBe('https://files.example.com')
-    expect(resolveOptions({ url: `https://db.example.com/shop?key=${key}`, token: 't', database: 'other' }).database).toBe('other')
+    expect(
+      resolveOptions({
+        url: `https://db.example.com/shop?key=${key}`,
+        token: 't',
+        storageUrl: 'https://files.example.com/',
+      }).storageUrl,
+    ).toBe('https://files.example.com')
+    expect(
+      resolveOptions({ url: `https://db.example.com/shop?key=${key}`, token: 't', database: 'other' }).database,
+    ).toBe('other')
   })
 
   test('mistakes are named', () => {
@@ -78,16 +139,27 @@ describe('connection strings', () => {
   test('options resolve with defaults and derive the storage URL', () => {
     const o = resolveOptions({ url: `wss://db.example.com/rt/v1?db=shop&key=${key}`, apiKey: 'k' })
     expect(o).toMatchObject({
-      database: 'shop', webSocketUrl: 'wss://db.example.com/rt/v1', storageUrl: 'https://db.example.com', credential: 'k', pool: 1,
-      reconnectMinMs: 100, reconnectMaxMs: 30_000, requestTimeoutMs: 30_000, clientName: 'azora-js/0.1',
+      database: 'shop',
+      webSocketUrl: 'wss://db.example.com/rt/v1',
+      storageUrl: 'https://db.example.com',
+      credential: 'k',
+      pool: 1,
+      reconnectMinMs: 100,
+      reconnectMaxMs: 30_000,
+      requestTimeoutMs: 30_000,
+      clientName: 'azora-js/0.1',
     })
-    expect(resolveOptions({ url: `azora://h/shop?key=${key}`, apiKey: 'k', storageUrl: 'http://files:8080/' }).storageUrl).toBe('http://files:8080')
+    expect(
+      resolveOptions({ url: `azora://h/shop?key=${key}`, apiKey: 'k', storageUrl: 'http://files:8080/' }).storageUrl,
+    ).toBe('http://files:8080')
     expect(resolveOptions({ url: `azora://h/shop?key=${key}`, database: 'other', apiKey: 'k' }).database).toBe('other') // fields win over the URL
     const provider = (): string => 't'
     expect(resolveOptions({ url: `azora://h/shop?key=${key}`, token: provider }).credentialProvider).toBe(provider)
     expect(() => resolveOptions({ url: 'azora://h/shop?fp=azp1-nope', apiKey: 'k' })).toThrow(/fingerprint/)
     expect(() => resolveOptions({ url: 'azora://h/shop?key=short', apiKey: 'k' })).toThrow(/32-byte key/)
-    expect(() => resolveOptions({ host: 'h', port: 70000, database: 'd', apiKey: 'k', allowPlaintext: true })).toThrow(/port/)
+    expect(() => resolveOptions({ host: 'h', port: 70000, database: 'd', apiKey: 'k', allowPlaintext: true })).toThrow(
+      /port/,
+    )
   })
 
   test('server keys in every base64 spelling', () => {
@@ -156,8 +228,23 @@ describe('sql tag and helpers', () => {
   })
 
   test('schema changes are recognised the way the server does', () => {
-    for (const q of ['CREATE TABLE t(x)', '  create index i on t(x)', '/* c */ ALTER TABLE t ADD y', '-- c\nDROP TABLE t', ';;drop table t']) expect(isDDL(q), q).toBe(true)
-    for (const q of ['INSERT INTO t VALUES (1)', 'SELECT 1', '', '/* unterminated CREATE', 'creates', 'WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x']) expect(isDDL(q), q).toBe(false)
+    for (const q of [
+      'CREATE TABLE t(x)',
+      '  create index i on t(x)',
+      '/* c */ ALTER TABLE t ADD y',
+      '-- c\nDROP TABLE t',
+      ';;drop table t',
+    ])
+      expect(isDDL(q), q).toBe(true)
+    for (const q of [
+      'INSERT INTO t VALUES (1)',
+      'SELECT 1',
+      '',
+      '/* unterminated CREATE',
+      'creates',
+      'WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x',
+    ])
+      expect(isDDL(q), q).toBe(false)
   })
 
   test('keys and value order', () => {
@@ -174,7 +261,11 @@ describe('secure channel', () => {
   test('both AEAD implementations agree', () => {
     const key = Uint8Array.from({ length: 32 }, (_, i) => i)
     const nonce = Uint8Array.from({ length: 12 }, (_, i) => 255 - i)
-    for (const [ad, pt] of [[new Uint8Array(0), new Uint8Array(0)], [Uint8Array.of(1, 2, 3), new TextEncoder().encode('attack at dawn')], [new Uint8Array(32), new Uint8Array(70_000).fill(7)]] as const) {
+    for (const [ad, pt] of [
+      [new Uint8Array(0), new Uint8Array(0)],
+      [Uint8Array.of(1, 2, 3), new TextEncoder().encode('attack at dawn')],
+      [new Uint8Array(32), new Uint8Array(70_000).fill(7)],
+    ] as const) {
       const a = nodeAead.seal(key, nonce, ad, pt)
       expect(webAead.seal(key, nonce, ad, pt)).toEqual(a)
       expect(nodeAead.open(key, nonce, ad, a)).toEqual(pt)
@@ -188,7 +279,13 @@ describe('secure channel', () => {
 
   /** A pair of in-memory transports wired to each other. */
   function pipe(): [Transport, Transport] {
-    const make = (): Transport => ({ send: () => {}, close: () => {}, onFrame: () => {}, onClose: () => {}, bufferedAmount: 0 })
+    const make = (): Transport => ({
+      send: () => {},
+      close: () => {},
+      onFrame: () => {},
+      onClose: () => {},
+      bufferedAmount: 0,
+    })
     const a = make()
     const b = make()
     a.send = (f) => {
@@ -205,7 +302,11 @@ describe('secure channel', () => {
   }
 
   /** Plays the server's side of the handshake over t and returns its channel. */
-  async function serve(t: Transport, server: ReturnType<typeof generateKeyPair>, rekeyFrames: number): Promise<Channel> {
+  async function serve(
+    t: Transport,
+    server: ReturnType<typeof generateKeyPair>,
+    rekeyFrames: number,
+  ): Promise<Channel> {
     const frames: Uint8Array[] = []
     let wake: (() => void) | null = null
     t.onFrame = (f) => {
@@ -237,7 +338,12 @@ describe('secure channel', () => {
       const [c, s] = pipe()
       const serverSide = serve(s, server, 7)
       let verified: Uint8Array | null = null
-      const client = await openChannel(c, pattern === 'IK' ? { serverKey: server.publicKey, rekeyFrames: 7 } : { verifyServer: (k) => void (verified = k), rekeyFrames: 7 })
+      const client = await openChannel(
+        c,
+        pattern === 'IK'
+          ? { serverKey: server.publicKey, rekeyFrames: 7 }
+          : { verifyServer: (k) => void (verified = k), rekeyFrames: 7 },
+      )
       const sch = await serverSide
       expect(client.mode).toBe(pattern)
       expect(client.serverKey).toEqual(server.publicKey)
