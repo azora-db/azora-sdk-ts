@@ -196,7 +196,7 @@ export class Storage {
   private url(path: string, query?: Record<string, string | number | boolean | undefined>): string {
     if (!this.base) {
       throw new TypeError(
-        'azora: file storage needs the engine\'s HTTP address: connect with an http(s) URL (https://db.example.com/<database>), or set the storageUrl option',
+        "azora: file storage needs the engine's HTTP address: connect with an http(s) URL (https://db.example.com/<database>), or set the storageUrl option",
       )
     }
     let u = `${this.base}/storage/v1/${path}`
@@ -233,11 +233,25 @@ export class Storage {
    */
   async upload(body: UploadBody, o: UploadOptions = {}): Promise<StoredObject> {
     const b = this.body(body)
-    const headers: Record<string, string> = { 'Content-Type': o.contentType ?? (body instanceof Blob && body.type ? body.type : 'application/octet-stream') }
+    const headers: Record<string, string> = {
+      'Content-Type': o.contentType ?? (body instanceof Blob && body.type ? body.type : 'application/octet-stream'),
+    }
     if (o.sha256) headers['X-Azora-SHA256'] = o.sha256
     const res = await this.request(
-      this.url(`b/${this.db}/objects`, { bucket: o.bucket, path: o.path, name: o.name, overwrite: o.overwrite, content_type: o.contentType }),
-      { method: 'POST', headers, body: b.body, ...(b.stream ? { duplex: 'half' as const } : {}), ...(o.signal ? { signal: o.signal } : {}) },
+      this.url(`b/${this.db}/objects`, {
+        bucket: o.bucket,
+        path: o.path,
+        name: o.name,
+        overwrite: o.overwrite,
+        content_type: o.contentType,
+      }),
+      {
+        method: 'POST',
+        headers,
+        body: b.body,
+        ...(b.stream ? { duplex: 'half' as const } : {}),
+        ...(o.signal ? { signal: o.signal } : {}),
+      },
     )
     return toObject(((await res.json()) as { object: WireObject }).object)
   }
@@ -249,7 +263,10 @@ export class Storage {
    * process or page ends, store the URL `onSession` reports and pass it
    * to `resumeUpload` with the same content.
    */
-  async uploadResumable(body: Blob | ArrayBuffer | ArrayBufferView, o: ResumableUploadOptions = {}): Promise<StoredObject> {
+  async uploadResumable(
+    body: Blob | ArrayBuffer | ArrayBufferView,
+    o: ResumableUploadOptions = {},
+  ): Promise<StoredObject> {
     const blob = body instanceof Blob ? body : new Blob([body as BlobPart])
     const sig = o.signal ? { signal: o.signal } : {}
     const headers: Record<string, string> = { 'Upload-Length': String(blob.size) }
@@ -266,7 +283,11 @@ export class Storage {
   }
 
   /** `resumeUpload`, reachable from the class: see the function of that name. */
-  static resumeUpload(sessionUrl: string, body: Blob | ArrayBuffer | ArrayBufferView, o: ResumeUploadOptions = {}): Promise<StoredObject> {
+  static resumeUpload(
+    sessionUrl: string,
+    body: Blob | ArrayBuffer | ArrayBufferView,
+    o: ResumeUploadOptions = {},
+  ): Promise<StoredObject> {
     return resumeUpload(sessionUrl, body, o)
   }
 
@@ -278,12 +299,18 @@ export class Storage {
   async download(id: string, o: { range?: readonly [number, number?]; signal?: AbortSignal } = {}): Promise<Response> {
     const headers: Record<string, string> = {}
     if (o.range) headers['Range'] = `bytes=${o.range[0]}-${o.range[1] ?? ''}`
-    return this.request(this.url(`b/${this.db}/objects/${encodeURIComponent(id)}/content`), { headers, ...(o.signal ? { signal: o.signal } : {}) })
+    return this.request(this.url(`b/${this.db}/objects/${encodeURIComponent(id)}/content`), {
+      headers,
+      ...(o.signal ? { signal: o.signal } : {}),
+    })
   }
 
   /** Describes an object. */
   async stat(id: string, o: { signal?: AbortSignal } = {}): Promise<StoredObject> {
-    const res = await this.request(this.url(`b/${this.db}/objects/${encodeURIComponent(id)}`), o.signal ? { signal: o.signal } : {})
+    const res = await this.request(
+      this.url(`b/${this.db}/objects/${encodeURIComponent(id)}`),
+      o.signal ? { signal: o.signal } : {},
+    )
     return toObject(((await res.json()) as { object: WireObject }).object)
   }
 
@@ -324,7 +351,12 @@ export class Storage {
     const res = await this.request(this.url(`b/${this.db}/sign`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ttl_seconds: o.ttlSeconds ?? 0, download: o.download ?? false, filename: o.filename ?? '' }),
+      body: JSON.stringify({
+        id,
+        ttl_seconds: o.ttlSeconds ?? 0,
+        download: o.download ?? false,
+        filename: o.filename ?? '',
+      }),
       ...(o.signal ? { signal: o.signal } : {}),
     })
     const body = (await res.json()) as { url: string; expires_at: string }
@@ -342,8 +374,18 @@ export class Storage {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        bucket: g.bucket, path: g.path, overwrite: g.overwrite, allowed_types: g.allowedTypes, max_size: g.maxSize, keep: g.keep,
-        metadata: g.metadata, table: g.table, column: g.column, key: g.key, key_value: g.keyValue, ttl_seconds: g.ttlSeconds ?? 0,
+        bucket: g.bucket,
+        path: g.path,
+        overwrite: g.overwrite,
+        allowed_types: g.allowedTypes,
+        max_size: g.maxSize,
+        keep: g.keep,
+        metadata: g.metadata,
+        table: g.table,
+        column: g.column,
+        key: g.key,
+        key_value: g.keyValue,
+        ttl_seconds: g.ttlSeconds ?? 0,
       }),
       ...(g.signal ? { signal: g.signal } : {}),
     })
@@ -414,7 +456,8 @@ async function sendToSession(
       o.onProgress?.(offset, total)
     } catch (e) {
       if (o.signal?.aborted || ++failures > (o.retries ?? 5)) throw e
-      if (e instanceof AzoraError && e.status !== undefined && e.status !== 409 && e.status < 500 && e.status !== 429) throw sessionGone(e)
+      if (e instanceof AzoraError && e.status !== undefined && e.status !== 409 && e.status < 500 && e.status !== 429)
+        throw sessionGone(e)
       await new Promise((r) => setTimeout(r, Math.min(200 * 2 ** failures, 5000)))
       // Ask where the session is: bytes received before the failure are kept.
       const head = await request(location, { method: 'HEAD' })
@@ -422,7 +465,10 @@ async function sendToSession(
     }
   }
   if (offset > total) {
-    throw new AzoraError(ErrorCode.Invalid, `azora: storage: the session holds ${offset} bytes, more than the ${total} to upload`)
+    throw new AzoraError(
+      ErrorCode.Invalid,
+      `azora: storage: the session holds ${offset} bytes, more than the ${total} to upload`,
+    )
   }
   const done = await request(`${location}/complete`, { method: 'POST' }).catch((e: unknown) => {
     throw sessionGone(e)
@@ -458,7 +504,7 @@ export async function resumeUpload(
   const offset = Number(head.headers.get('Upload-Offset') ?? 0)
   const declared = Number(head.headers.get('Upload-Length') ?? 0)
   if (!Number.isFinite(offset) || offset < 0) {
-    throw new AzoraError(ErrorCode.Internal, 'azora: storage: the server did not report the session\'s offset')
+    throw new AzoraError(ErrorCode.Internal, "azora: storage: the server did not report the session's offset")
   }
   if (declared > 0 && declared !== total) {
     throw new AzoraError(
@@ -488,7 +534,9 @@ export async function uploadToSignedUrl(
   const f = o.fetch ?? globalThis.fetch
   const res = await f(url, {
     method: 'PUT',
-    headers: { 'Content-Type': o.contentType ?? (body instanceof Blob && body.type ? body.type : 'application/octet-stream') },
+    headers: {
+      'Content-Type': o.contentType ?? (body instanceof Blob && body.type ? body.type : 'application/octet-stream'),
+    },
     body: body as BodyInit,
     ...(o.signal ? { signal: o.signal } : {}),
   })
