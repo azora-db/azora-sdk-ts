@@ -451,7 +451,14 @@ export class Subscription implements AsyncIterable<Update> {
       this.partialBytes = 0
       return
     }
-    this.ready.push({ changes: this.partial, cp: b.checkpoint, epoch: b.epoch, reset: this.pReset, snapshot: this.pSnap, bytes: this.partialBytes })
+    this.ready.push({
+      changes: this.partial,
+      cp: b.checkpoint,
+      epoch: b.epoch,
+      reset: this.pReset,
+      snapshot: this.pSnap,
+      bytes: this.partialBytes,
+    })
     this.readyBytes += this.partialBytes
     this.partial = []
     this.pReset = this.pSnap = false
@@ -630,7 +637,13 @@ export class Subscription implements AsyncIterable<Update> {
         }
         if (m.type !== MsgType.Verified) throw new Error(`azora: unexpected answer type ${m.type} to verify`)
         const res: VerifyResult = {
-          match: false, checkpoint: m.checkpoint, epoch: m.epoch, serverRows: m.rows, serverSum: m.sum, localRows: 0, localSum: 0n,
+          match: false,
+          checkpoint: m.checkpoint,
+          epoch: m.epoch,
+          serverRows: m.rows,
+          serverSum: m.sum,
+          localRows: 0,
+          localSum: 0n,
         }
         if (this.wire !== wire) continue
         const d = this.delivered
