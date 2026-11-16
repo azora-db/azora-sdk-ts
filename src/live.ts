@@ -21,7 +21,11 @@ export interface LiveOptions<T> {
    * Orders `rows`: a column name, `[column, 'desc']`, several of those, or
    * a comparator. Default: primary key order.
    */
-  orderBy?: string | readonly [string, 'asc' | 'desc'] | ReadonlyArray<string | readonly [string, 'asc' | 'desc']> | ((a: T, b: T) => number)
+  orderBy?:
+    | string
+    | readonly [string, 'asc' | 'desc']
+    | ReadonlyArray<string | readonly [string, 'asc' | 'desc']>
+    | ((a: T, b: T) => number)
   /** Converts a row object (column name to value) to the type the application uses. */
   map?: (row: Row) => T
   /**
@@ -71,7 +75,13 @@ interface Entry<T> {
 /** Orders SQLite values: NULL, then numbers, then text, then blobs. */
 export function compareValues(a: Value, b: Value): number {
   const rank = (v: Value): number =>
-    v === null ? 0 : typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean' ? 1 : typeof v === 'string' ? 2 : 3
+    v === null
+      ? 0
+      : typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean'
+        ? 1
+        : typeof v === 'string'
+          ? 2
+          : 3
   const ra = rank(a)
   const rb = rank(b)
   if (ra !== rb) return ra - rb
@@ -153,7 +163,9 @@ export class LiveQuery<T = Row> implements AsyncIterable<LiveEvent<T>> {
         ? [[o, 'asc']]
         : o.length === 2 && typeof o[0] === 'string' && (o[1] === 'asc' || o[1] === 'desc')
           ? [o as readonly [string, 'asc' | 'desc']]
-          : (o as ReadonlyArray<string | readonly [string, 'asc' | 'desc']>).map((s) => (typeof s === 'string' ? [s, 'asc'] : s))
+          : (o as ReadonlyArray<string | readonly [string, 'asc' | 'desc']>).map((s) =>
+              typeof s === 'string' ? [s, 'asc'] : s,
+            )
     return (a, b) => {
       for (const [col, dir] of specs) {
         const i = this.columns.indexOf(col)
