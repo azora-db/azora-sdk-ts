@@ -47,7 +47,8 @@ export function clientStringify(v: unknown): string {
 function revive(_k: string, x: unknown): unknown {
   if (x !== null && typeof x === 'object' && !Array.isArray(x)) {
     const o = x as Record<string, unknown>
-    if (typeof o['$bytes'] === 'string' && Object.keys(o).length === 1) return new Uint8Array(Buffer.from(o['$bytes'], 'base64'))
+    if (typeof o['$bytes'] === 'string' && Object.keys(o).length === 1)
+      return new Uint8Array(Buffer.from(o['$bytes'], 'base64'))
   }
   return x
 }
