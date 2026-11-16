@@ -10,7 +10,16 @@
  *
  * @packageDocumentation
  */
-export { BundleError, bundleUnits, evaluateBundle, findEntry, manifestOf, type Bundle, type BundleOptions, type ManifestUnit } from './bundle.ts'
+export {
+  BundleError,
+  bundleUnits,
+  evaluateBundle,
+  findEntry,
+  manifestOf,
+  type Bundle,
+  type BundleOptions,
+  type ManifestUnit,
+} from './bundle.ts'
 export { EnvError, loadEnv, type Env } from './env.ts'
 export { generateGo, goName, goPackage, type GoUnit } from './gogen.ts'
 export { publishUnits, type PublishOptions, type PublishResult } from './publish.ts'
