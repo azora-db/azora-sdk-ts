@@ -25,14 +25,22 @@ test('checkout turns the cart into an order, atomically', async () => {
   const t = shop()
   const { orderId, total } = await t.call('checkout', { cartId: 'c42' })
   assert.equal(total, 89.5)
-  assert.deepEqual(t.db.one('SELECT customer, status FROM orders WHERE id = ?', orderId), { customer: 42, status: 'open' })
+  assert.deepEqual(t.db.one('SELECT customer, status FROM orders WHERE id = ?', orderId), {
+    customer: 42,
+    status: 'open',
+  })
   assert.equal(t.db.value("SELECT count(*) FROM carts WHERE id = 'c42'"), 0)
-  assert.deepEqual(await t.units.myOrders(), [{ id: orderId, customer: 42, status: 'open', total: 89.5, note: 'Monitor light bar' }])
+  assert.deepEqual(await t.units.myOrders(), [
+    { id: orderId, customer: 42, status: 'open', total: 89.5, note: 'Monitor light bar' },
+  ])
 })
 
 test("someone else's cart is refused, and nothing changes", async () => {
   const t = shop()
-  await assert.rejects(t.call('checkout', { cartId: 'c7' }), (e) => e instanceof UnitError && e.code === 'permission_denied')
+  await assert.rejects(
+    t.call('checkout', { cartId: 'c7' }),
+    (e) => e instanceof UnitError && e.code === 'permission_denied',
+  )
   assert.equal(t.db.value('SELECT count(*) FROM orders'), 0)
   // A backend (an API key) may check out any cart.
   await t.call('checkout', { cartId: 'c7' }, { auth: { kind: 'key', principal: 'key:backend' } })
@@ -52,7 +60,10 @@ test('a reminder job runs a day later, unless the cart was checked out', async (
   await t.advance(23 * 3600e3)
   assert.equal(t.db.value("SELECT count(*) FROM audit WHERE what = 'reminder'"), 0)
   await t.advance(3600e3)
-  assert.equal(t.db.value("SELECT detail FROM audit WHERE what = 'reminder'"), `cart c42 of customer 42 is waiting (${jobId})`)
+  assert.equal(
+    t.db.value("SELECT detail FROM audit WHERE what = 'reminder'"),
+    `cart c42 of customer 42 is waiting (${jobId})`,
+  )
 
   await t.call('remindCart', { cartId: 'c42', minutes: 60 })
   await t.call('checkout', { cartId: 'c42' })
