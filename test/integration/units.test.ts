@@ -30,7 +30,20 @@ describe.skipIf(!engineBinary())('units', () => {
         'CREATE TABLE audit(id INTEGER PRIMARY KEY, at INTEGER NOT NULL, what TEXT NOT NULL, detail TEXT)',
         'CREATE TABLE counter(id INTEGER PRIMARY KEY, n INTEGER NOT NULL)',
       ],
-      tokens: { customer42: ['--sub', 'user:42', '--scope', 'read', '--ttl', '1h', '--table', 'orders', '--filter', 'orders: customer = 42'] },
+      tokens: {
+        customer42: [
+          '--sub',
+          'user:42',
+          '--scope',
+          'read',
+          '--ttl',
+          '1h',
+          '--table',
+          'orders',
+          '--filter',
+          'orders: customer = 42',
+        ],
+      },
     })
     const doc = (await (await fetch(`${engine.httpUrl}/.well-known/azora.json`)).json()) as { features?: unknown }
     supported = Array.isArray(doc.features) && doc.features.includes('units')
@@ -47,17 +60,23 @@ describe.skipIf(!engineBinary())('units', () => {
 
   /** A test that needs an engine with units. */
   const it = (name: string, fn: () => Promise<void>, timeout?: number): void => {
-    test(name, async (ctx) => {
-      if (!supported) ctx.skip()
-      await fn()
-    }, timeout)
+    test(
+      name,
+      async (ctx) => {
+        if (!supported) ctx.skip()
+        await fn()
+      },
+      timeout,
+    )
   }
 
   test('without units, a connection that read the discovery document refuses calls clearly', async (ctx) => {
     if (supported) ctx.skip()
     const old = await connect(engine.connectUrl, { token: engine.apiKey }) // loopback: the key comes from discovery
     try {
-      await expect(old.call('checkout', { cartId: 'c1' })).rejects.toThrow('unavailable: this server does not support units')
+      await expect(old.call('checkout', { cartId: 'c1' })).rejects.toThrow(
+        'unavailable: this server does not support units',
+      )
     } finally {
       await old.close()
     }
@@ -71,18 +90,57 @@ describe.skipIf(!engineBinary())('units', () => {
     expect(first).toMatchObject({ unchanged: false, dryRun: false })
     expect(first.version).toBeGreaterThan(0)
     const names = first.units.map((u) => u.name).sort()
-    expect(names).toEqual([
-      'audit', 'bump', 'boom', 'cartReminder', 'checkout', 'echo', 'hasSecret', 'myOrders', 'orderPlaced', 'refuse', 'remindCart', 'stats', 'whoami',
-      // ctx.storage
-      'avatarUpload', 'dropReport', 'findReport', 'putReport', 'putThenFail', 'queryPut', 'readDoc', 'readMissing', 'saveDoc',
-      // plain HTTP
-      'httpEcho', 'httpHook', 'httpSum',
-    ].sort())
+    expect(names).toEqual(
+      [
+        'audit',
+        'bump',
+        'boom',
+        'cartReminder',
+        'checkout',
+        'echo',
+        'hasSecret',
+        'myOrders',
+        'orderPlaced',
+        'refuse',
+        'remindCart',
+        'stats',
+        'whoami',
+        // ctx.storage
+        'avatarUpload',
+        'dropReport',
+        'findReport',
+        'putReport',
+        'putThenFail',
+        'queryPut',
+        'readDoc',
+        'readMissing',
+        'saveDoc',
+        // plain HTTP
+        'httpEcho',
+        'httpHook',
+        'httpSum',
+      ].sort(),
+    )
     expect(first.units.find((u) => u.name === 'checkout')).toMatchObject({
-      kind: 'mutation', internal: false, args: { type: 'object', properties: { cartId: { type: 'string', minLength: 1, maxLength: 64 } }, required: ['cartId'] },
+      kind: 'mutation',
+      internal: false,
+      args: {
+        type: 'object',
+        properties: { cartId: { type: 'string', minLength: 1, maxLength: 64 } },
+        required: ['cartId'],
+      },
     })
-    expect(first.units.find((u) => u.name === 'stats')).toMatchObject({ kind: 'schedule', internal: true, every: '1m', mode: 'mutation' })
-    expect(first.units.find((u) => u.name === 'orderPlaced')).toMatchObject({ kind: 'onChange', table: 'orders', ops: ['insert'] })
+    expect(first.units.find((u) => u.name === 'stats')).toMatchObject({
+      kind: 'schedule',
+      internal: true,
+      every: '1m',
+      mode: 'mutation',
+    })
+    expect(first.units.find((u) => u.name === 'orderPlaced')).toMatchObject({
+      kind: 'onChange',
+      table: 'orders',
+      ops: ['insert'],
+    })
     const again = await publishUnits(db, dir)
     expect(again).toMatchObject({ unchanged: true, version: first.version })
     const list = await db.unitsAdmin.list()
@@ -93,8 +151,17 @@ describe.skipIf(!engineBinary())('units', () => {
   })
 
   it('calls: results, blobs, typed db.units, the caller in ctx.auth', async () => {
-    expect(await db.call('echo', { a: [1, 'x', null], b: Uint8Array.of(0, 255) })).toEqual({ a: [1, 'x', null], b: Uint8Array.of(0, 255) })
-    expect(await db.units.whoami()).toMatchObject({ kind: 'key', principal: 'key:app', subject: '', unit: 'whoami', trigger: 'call' })
+    expect(await db.call('echo', { a: [1, 'x', null], b: Uint8Array.of(0, 255) })).toEqual({
+      a: [1, 'x', null],
+      b: Uint8Array.of(0, 255),
+    })
+    expect(await db.units.whoami()).toMatchObject({
+      kind: 'key',
+      principal: 'key:app',
+      subject: '',
+      unit: 'whoami',
+      trigger: 'call',
+    })
     expect(await customer.units.whoami()).toMatchObject({ kind: 'token', subject: 'user:42' })
   })
 
@@ -106,21 +173,35 @@ describe.skipIf(!engineBinary())('units', () => {
     ])
     const { orderId, total } = await customer.units.checkout({ cartId: 'k42' })
     expect(total).toBe(20)
-    expect(await db.queryOne('SELECT customer, status, total FROM orders WHERE id = ?', [orderId])).toEqual({ customer: 42, status: 'open', total: 20 })
+    expect(await db.queryOne('SELECT customer, status, total FROM orders WHERE id = ?', [orderId])).toEqual({
+      customer: 42,
+      status: 'open',
+      total: 20,
+    })
     expect(await db.queryValue("SELECT count(*) FROM carts WHERE id = 'k42'")).toBe(0)
-    await expect(customer.units.checkout({ cartId: 'k7' })).rejects.toMatchObject({ name: 'UnitError', code: 'permission_denied' })
+    await expect(customer.units.checkout({ cartId: 'k7' })).rejects.toMatchObject({
+      name: 'UnitError',
+      code: 'permission_denied',
+    })
     // checkout declares access "any"; bump declares nothing, so a mutation
     // needs the write scope, which the customer's token does not have.
-    await expect(customer.call('bump', { by: 1 })).rejects.toSatisfy((e) => isCode(e, 'permission_denied') && /needs the write scope/.test((e as Error).message))
+    await expect(customer.call('bump', { by: 1 })).rejects.toSatisfy(
+      (e) => isCode(e, 'permission_denied') && /needs the write scope/.test((e as Error).message),
+    )
     expect((await db.unitsAdmin.list()).units.find((u) => u.name === 'checkout')?.access).toBe('any')
     expect((await db.unitsAdmin.list()).units.find((u) => u.name === 'bump')?.access).toBe('write')
-    await expect(customer.units.checkout({ cartId: 'k404' })).rejects.toMatchObject({ code: 'not_found', data: { cartId: 'k404' } })
+    await expect(customer.units.checkout({ cartId: 'k404' })).rejects.toMatchObject({
+      code: 'not_found',
+      data: { cartId: 'k404' },
+    })
     const mine = await customer.units.myOrders()
     expect(mine.length).toBeGreaterThan(0)
     expect(mine.every((o) => o.customer === 42)).toBe(true)
     await expect(db.units.myOrders()).rejects.toMatchObject({ code: 'permission_denied' }) // the API key is no customer
     // The checkout's audit line (ctx.run of an internal unit) committed with it.
-    expect(await db.queryValue("SELECT count(*) FROM audit WHERE what = 'checkout' AND detail LIKE 'cart k42 %'")).toBe(1)
+    expect(await db.queryValue("SELECT count(*) FROM audit WHERE what = 'checkout' AND detail LIKE 'cart k42 %'")).toBe(
+      1,
+    )
   })
 
   it('a mutation runs exactly once per mutation id, and rolls back when it throws', async () => {
@@ -132,7 +213,11 @@ describe.skipIf(!engineBinary())('units', () => {
     const c = await db.units.bump({ by: 1 }) // a fresh id
     expect(c.n).toBe(a.n + 1)
     expect(c.mutationId).toMatch(/^m-/)
-    await expect(db.call('boom')).rejects.toMatchObject({ name: 'UnitError', code: 'failed', message: expect.stringContaining('boom') })
+    await expect(db.call('boom')).rejects.toMatchObject({
+      name: 'UnitError',
+      code: 'failed',
+      message: expect.stringContaining('boom'),
+    })
     expect(await db.queryValue('SELECT count(*) FROM counter WHERE id = 99')).toBe(0)
   })
 
@@ -141,25 +226,41 @@ describe.skipIf(!engineBinary())('units', () => {
     expect(e).toBeInstanceOf(UnitError)
     expect(e).toMatchObject({ unit: 'refuse', code: 'conflict', message: 'already paid', data: { order: 7 } })
     await expect(db.call('nope')).rejects.toSatisfy((x) => x instanceof AzoraError && x.code === 'not_found')
-    await expect(db.call('audit', { what: 'x' })).rejects.toSatisfy((x) => x instanceof AzoraError && x.code === 'permission_denied')
-    await expect(db.call('checkout', { cartId: 1 })).rejects.toSatisfy((x) => x instanceof AzoraError && x.code === 'invalid')
+    await expect(db.call('audit', { what: 'x' })).rejects.toSatisfy(
+      (x) => x instanceof AzoraError && x.code === 'permission_denied',
+    )
+    await expect(db.call('checkout', { cartId: 1 })).rejects.toSatisfy(
+      (x) => x instanceof AzoraError && x.code === 'invalid',
+    )
     await expect(db.call('checkout', { cartId: 'a', extra: true })).rejects.toSatisfy((x) => isCode(x, 'invalid'))
     await expect(db.call('bump', { by: 0 })).rejects.toSatisfy((x) => isCode(x, 'invalid'))
   })
 
   it('onChange: every new order gets an audit line', async () => {
     const audited = async (id: number | bigint): Promise<boolean> =>
-      (await db.queryValue<number>("SELECT count(*) FROM audit WHERE what = 'order placed' AND detail LIKE ?", [`order ${id} %`])) === 1
+      (await db.queryValue<number>("SELECT count(*) FROM audit WHERE what = 'order placed' AND detail LIKE ?", [
+        `order ${id} %`,
+      ])) === 1
     const first = await db.exec("INSERT INTO orders(customer, status, total) VALUES (3, 'open', 1)")
     await new Promise((r) => setTimeout(r, 500))
     const second = await db.exec("INSERT INTO orders(customer, status, total) VALUES (3, 'open', 2)")
     await until(() => audited(second.lastInsertId), 'the onChange run for the second order')
     const runs = await db.unitsAdmin.runs({ unit: 'orderPlaced' })
-    expect(runs[0]).toMatchObject({ unit: 'orderPlaced', kind: 'onChange', trigger: 'change', principal: 'system', status: 'ok' })
+    expect(runs[0]).toMatchObject({
+      unit: 'orderPlaced',
+      kind: 'onChange',
+      trigger: 'change',
+      principal: 'system',
+      status: 'ok',
+    })
     expect((await db.unitsAdmin.triggers()).map((t) => t.unit).sort()).toEqual(['orderPlaced', 'stats'])
     // Every change exactly once: the first order too, and the orders the checkout unit wrote earlier.
     expect(await audited(first.lastInsertId), 'the first order after the deploy').toBe(true)
-    expect(await db.queryValue("SELECT count(*) FROM orders o WHERE NOT EXISTS (SELECT 1 FROM audit a WHERE a.what = 'order placed' AND a.detail LIKE 'order ' || o.id || ' %')")).toBe(0)
+    expect(
+      await db.queryValue(
+        "SELECT count(*) FROM orders o WHERE NOT EXISTS (SELECT 1 FROM audit a WHERE a.what = 'order placed' AND a.detail LIKE 'order ' || o.id || ' %')",
+      ),
+    ).toBe(0)
   })
 
   it('admin: runs, secrets, admin calls, rollback, and the ddl scope', async () => {
@@ -179,8 +280,11 @@ describe.skipIf(!engineBinary())('units', () => {
     await expect(customer.unitsAdmin.list()).rejects.toSatisfy((x) => isCode(x, 'permission_denied'))
     // A second deploy, then a rollback to the first.
     const before = (await db.unitsAdmin.list()).version
-    await expect(db.unitsAdmin.deploy({ bundle: 'globalThis.__azora_units = {}' })).rejects.toSatisfy((x) => isCode(x, 'invalid')) // no units
-    const only = 'globalThis.__azora_units = { one: { "~azora": 1, kind: "query", handler: function () { return 1 }, args: null, internal: false, description: "" } }'
+    await expect(db.unitsAdmin.deploy({ bundle: 'globalThis.__azora_units = {}' })).rejects.toSatisfy((x) =>
+      isCode(x, 'invalid'),
+    ) // no units
+    const only =
+      'globalThis.__azora_units = { one: { "~azora": 1, kind: "query", handler: function () { return 1 }, args: null, internal: false, description: "" } }'
     const smaller = await db.unitsAdmin.deploy({ bundle: only, note: 'one unit' })
     expect(smaller.version).toBeGreaterThan(before)
     expect(smaller.units.map((u) => u.name)).toEqual(['one'])
