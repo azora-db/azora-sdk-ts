@@ -147,7 +147,7 @@ export class Writer {
       v = BigInt(v)
     }
     if (v < I64_MIN || v > I64_MAX) throw new CodecError(`integer ${v} does not fit in 64 bits`)
-    this.uBig(v >= 0n ? v << 1n : ((-v) << 1n) - 1n)
+    this.uBig(v >= 0n ? v << 1n : (-v << 1n) - 1n)
   }
 
   /** Length-prefixed UTF-8 string. */
