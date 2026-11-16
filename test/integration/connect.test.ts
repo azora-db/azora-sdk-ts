@@ -14,7 +14,20 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
 
   beforeAll(async () => {
     engine = await startEngine({
-      tokens: { reader: ['--sub', 'user:42', '--scope', 'read', '--ttl', '1h', '--table', 'orders', '--filter', 'orders: customer = 42'] },
+      tokens: {
+        reader: [
+          '--sub',
+          'user:42',
+          '--scope',
+          'read',
+          '--ttl',
+          '1h',
+          '--table',
+          'orders',
+          '--filter',
+          'orders: customer = 42',
+        ],
+      },
     })
   })
   afterEach(async () => {
@@ -29,7 +42,13 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
   /** The global fetch, recording the URLs asked. */
   const countingFetch = (): { fetch: typeof fetch; urls: string[] } => {
     const urls: string[] = []
-    return { urls, fetch: ((input: RequestInfo | URL, init?: RequestInit) => (urls.push(String(input)), fetch(input, init))) as typeof fetch }
+    return {
+      urls,
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => (
+        urls.push(String(input)),
+        fetch(input, init)
+      )) as typeof fetch,
+    }
   }
 
   test('the http URL with a pinned key, a fingerprint, or plaintext', async () => {
@@ -38,7 +57,11 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
     expect(db.name).toBe('shop')
     expect(db.session).toMatchObject({ mode: 'IK', serverKey: engine.serverKey, fingerprint: engine.fingerprint })
     expect(db.session?.scopes.sort()).toEqual(['ddl', 'read', 'write'])
-    const { lastInsertId } = await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [42, 'open', 12.5])
+    const { lastInsertId } = await db.exec('INSERT INTO orders(customer, status, total) VALUES (?, ?, ?)', [
+      42,
+      'open',
+      12.5,
+    ])
     expect(await db.queryValue('SELECT total FROM orders WHERE id = ?', [lastInsertId])).toBe(12.5)
 
     const xx = keep(await connect(`${engine.connectUrl}?fp=${engine.fingerprint}`, { token: engine.readKey, fetch }))
@@ -49,15 +72,26 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
     expect(urls).toEqual([]) // nothing was discovered
 
     const wrongKey = 'AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tk'
-    await expect(connect(`${engine.connectUrl}?key=${wrongKey}`, { token: engine.apiKey })).rejects.toBeInstanceOf(HandshakeError)
-    await expect(connect(`${engine.httpUrl}/nosuchdb?key=${engine.serverKey}`, { token: engine.apiKey })).rejects.toMatchObject({ name: 'AzoraError' })
-    await expect(connect(`${engine.connectUrl}?key=${engine.serverKey}`, { token: 'azk_nope_nope' })).rejects.toMatchObject({ code: 'unauthenticated' })
+    await expect(connect(`${engine.connectUrl}?key=${wrongKey}`, { token: engine.apiKey })).rejects.toBeInstanceOf(
+      HandshakeError,
+    )
+    await expect(
+      connect(`${engine.httpUrl}/nosuchdb?key=${engine.serverKey}`, { token: engine.apiKey }),
+    ).rejects.toMatchObject({ name: 'AzoraError' })
+    await expect(
+      connect(`${engine.connectUrl}?key=${engine.serverKey}`, { token: 'azk_nope_nope' }),
+    ).rejects.toMatchObject({ code: 'unauthenticated' })
   })
 
   test('without a key, the loopback server is asked for it', async () => {
     const doc = (await (await fetch(`${engine.httpUrl}/.well-known/azora.json`)).json()) as Record<string, unknown>
     const { features, ...rest } = doc
-    expect(rest).toEqual({ azora: 1, server_key: engine.serverKey, fingerprint: engine.fingerprint, websocket: '/rt/v1' })
+    expect(rest).toEqual({
+      azora: 1,
+      server_key: engine.serverKey,
+      fingerprint: engine.fingerprint,
+      websocket: '/rt/v1',
+    })
     if (features !== undefined) expect(features).toBeInstanceOf(Array) // optional features ("units"), newer engines only
 
     const { fetch: counting, urls } = countingFetch()
@@ -67,7 +101,9 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
     expect(await db.queryValue('SELECT count(*) FROM orders')).toBeGreaterThanOrEqual(0)
 
     // The same through `localhost`, with the runtime's own fetch and a pool.
-    const pooled = keep(await connect(`http://localhost:${new URL(engine.httpUrl).port}/shop`, { token: engine.readKey, pool: 3 }))
+    const pooled = keep(
+      await connect(`http://localhost:${new URL(engine.httpUrl).port}/shop`, { token: engine.readKey, pool: 3 }),
+    )
     expect(pooled.session).toMatchObject({ mode: 'IK', serverKey: engine.serverKey })
     expect(pooled.stats.connects).toBe(3)
 
@@ -140,11 +176,24 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
   test('a rotated server key is discovered again; a pinned one is refused', async () => {
     const { fetch, urls } = countingFetch()
     const errors: Error[] = []
-    const db = keep(await connect(engine.connectUrl, {
-      token: engine.apiKey, fetch, reconnectMinMs: 20, reconnectMaxMs: 200, onError: (e) => errors.push(e),
-    }))
+    const db = keep(
+      await connect(engine.connectUrl, {
+        token: engine.apiKey,
+        fetch,
+        reconnectMinMs: 20,
+        reconnectMaxMs: 200,
+        onError: (e) => errors.push(e),
+      }),
+    )
     const oldKey = engine.serverKey
-    const pinned = keep(await connect(`${engine.connectUrl}?key=${oldKey}`, { token: engine.apiKey, reconnectMinMs: 20, reconnectMaxMs: 200, onError: () => {} }))
+    const pinned = keep(
+      await connect(`${engine.connectUrl}?key=${oldKey}`, {
+        token: engine.apiKey,
+        reconnectMinMs: 20,
+        reconnectMaxMs: 200,
+        onError: () => {},
+      }),
+    )
     expect(urls).toHaveLength(1)
 
     // Replace the server's key while it is down.
@@ -161,6 +210,8 @@ describe.skipIf(!engineBinary())('connecting with a URL and a token', () => {
     expect(errors.some((e) => e instanceof HandshakeError)).toBe(true)
     expect(await db.queryValue('SELECT 1')).toBe(1)
     expect(pinned.connected).toBe(false)
-    await expect(connect(`${engine.connectUrl}?key=${oldKey}`, { token: engine.apiKey })).rejects.toBeInstanceOf(HandshakeError)
+    await expect(connect(`${engine.connectUrl}?key=${oldKey}`, { token: engine.apiKey })).rejects.toBeInstanceOf(
+      HandshakeError,
+    )
   })
 })
