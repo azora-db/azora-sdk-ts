@@ -15,10 +15,52 @@ export interface GoUnit {
 
 type Schema = Record<string, unknown>
 
-const INITIALISMS = new Set(['id', 'url', 'uri', 'http', 'https', 'json', 'sql', 'api', 'uuid', 'ip', 'html', 'css', 'cpu', 'ttl', 'utc', 'xml', 'sha', 'db'])
+const INITIALISMS = new Set([
+  'id',
+  'url',
+  'uri',
+  'http',
+  'https',
+  'json',
+  'sql',
+  'api',
+  'uuid',
+  'ip',
+  'html',
+  'css',
+  'cpu',
+  'ttl',
+  'utc',
+  'xml',
+  'sha',
+  'db',
+])
 const KEYWORDS = new Set([
-  'break', 'case', 'chan', 'const', 'continue', 'default', 'defer', 'else', 'fallthrough', 'for', 'func', 'go', 'goto', 'if', 'import',
-  'interface', 'map', 'package', 'range', 'return', 'select', 'struct', 'switch', 'type', 'var',
+  'break',
+  'case',
+  'chan',
+  'const',
+  'continue',
+  'default',
+  'defer',
+  'else',
+  'fallthrough',
+  'for',
+  'func',
+  'go',
+  'goto',
+  'if',
+  'import',
+  'interface',
+  'map',
+  'package',
+  'range',
+  'return',
+  'select',
+  'struct',
+  'switch',
+  'type',
+  'var',
 ])
 
 /** An exported Go identifier for a name: `cart_id` and `cartId` become `CartID`. */
@@ -28,7 +70,9 @@ export function goName(name: string): string {
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .split(/[^A-Za-z0-9]+/)
     .filter(Boolean)
-  let out = words.map((w) => (INITIALISMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join('')
+  let out = words
+    .map((w) => (INITIALISMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1)))
+    .join('')
   if (out === '' || /^[0-9]/.test(out)) out = 'X' + out
   return out
 }
@@ -124,7 +168,9 @@ class Gen {
   }
 
   private pointer(t: string): string {
-    return t === 'any' || t.startsWith('[]') || t.startsWith('map[') || t.startsWith('*') || t === 'azora.Bytes' ? t : '*' + t
+    return t === 'any' || t.startsWith('[]') || t.startsWith('map[') || t.startsWith('*') || t === 'azora.Bytes'
+      ? t
+      : '*' + t
   }
 
   /** Declares a struct for an object schema and returns its name. */
